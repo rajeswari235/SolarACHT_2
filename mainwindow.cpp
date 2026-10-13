@@ -2,6 +2,9 @@
 #include "ui_mainwindow.h"
 #include "testcontroller.h"
 
+#include <QPainter>
+#include <QAbstractTextDocumentLayout>
+
 QFile MainWindow::logFile;
 QTextStream MainWindow::logStream;
 
@@ -52,6 +55,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(ui->comboBox_ports,SIGNAL(activated(const QString &)),this,SLOT(onPortSelected(const QString &)));
     connect(test,&TestController::portOpening,this,&MainWindow::portStatus);
     connect(test,&TestController::executeWriteToNotes,this,&MainWindow::writeToNotes);
+     connect(ui->pushButton_refresh, &QPushButton::clicked, this, &MainWindow::refreshPorts);
 
     test->welcome();
     resetLogFile();
@@ -172,6 +176,30 @@ MainWindow::MainWindow(QWidget *parent)
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+void MainWindow::refreshPorts()
+{
+    qDebug() << "Refreshing ports...";
+
+    ui->comboBox_ports->clear();
+
+    QStringList ports =
+            test->availablePorts();
+
+    ui->comboBox_ports->addItems(ports);
+
+//    QString detectedPort =
+//            serialObj->detectDevicePort();
+
+//    if (!detectedPort.isEmpty())
+//    {
+//        ui->comboBox_ports ->setCurrentText(detectedPort);
+
+//        serialObj->setPORTNAME(detectedPort);
+
+//        qDebug() << "Auto connected to"
+//                 << detectedPort;
+//    }
 }
 
 bool MainWindow::initializeDatabase()
@@ -4651,4 +4679,520 @@ void MainWindow::on_pushButton_setColumnCalibrate_clicked()
         .arg(m_calibrationModel->rowCount()));
 
     //continue from here ...
+}
+
+void MainWindow::on_pushButton_saveTwoWirePdf_clicked()
+{
+     failedPinsCount = 0;
+     generateTwoWireTestPDF();
+}
+
+
+qreal MainWindow::drawTwoWireTestHeader(
+        QPainter &painter,
+        qreal pageWidth,
+        int failedPinsCount)
+{
+    QImage solarLogo(":/new/prefix1/images/solar1.png");
+    QImage drdoLogo(":/new/prefix1/images/drdo.png");
+
+    const qreal logoWidth = 95;
+    const qreal logoHeight = 55;
+
+    QFont normalFont("Times New Roman", 10);
+    QFont boldFont("Times New Roman", 10);
+    boldFont.setBold(true);
+
+    QFont titleFont("Times New Roman", 12);
+    titleFont.setBold(true);
+
+    QFont companyFont("Times New Roman", 14);
+    companyFont.setBold(true);
+
+    if (!solarLogo.isNull())
+        painter.drawImage(QRectF(0, 0, logoWidth, logoHeight),
+                          solarLogo);
+
+    if (!drdoLogo.isNull())
+        painter.drawImage(QRectF(pageWidth - logoWidth, 0,
+                                 logoWidth, logoHeight),
+                          drdoLogo);
+
+    painter.setPen(Qt::black);
+    painter.setFont(companyFont);
+
+    painter.drawText(
+        QRectF(logoWidth, 8, pageWidth - 2 * logoWidth, 25),
+        Qt::AlignCenter | Qt::TextWordWrap,
+        "SOLAR DEFENCE AND AEROSPACE LIMITED");
+
+    painter.setFont(titleFont);
+
+    painter.drawText(
+        QRectF(0, 40, pageWidth, 30),
+        Qt::AlignCenter | Qt::TextWordWrap,
+        "GNC KIT CABLE HARNESS TEST REPORT");
+
+    qreal y = 115;
+
+    painter.setFont(normalFont);
+
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Date : " +
+                     QDate::currentDate().toString("dd-MM-yyyy"));
+    y += 18;
+
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Time : " +
+                     QTime::currentTime().toString("hh:mm:ss AP"));
+    y += 18;
+
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Set No : " + ui->lineEdit_setNo->text());
+    y += 18;
+
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Test Type : " +
+                     ui->comboBox_test->currentText());
+    y += 18;
+
+    QString result = (failedPinsCount == 0) ? "Pass" : "Fail";
+
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Final Result : " + result);
+    y += 18;
+
+    painter.setFont(boldFont);
+
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Total Failed Pins : " +
+                     QString::number(failedPinsCount));
+
+    return y + 40;
+}
+
+void MainWindow::generateTwoWireTestPDF()
+{
+    if (!m_twoWireTestModel)
+        return;
+
+    // Create PDF folder on Desktop
+    QString desktopPath =
+            QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation);
+
+    QString folderPath = desktopPath + "/TwoWire_Pdf";
+
+    QDir dir;
+
+    if (!dir.exists(folderPath))
+        dir.mkpath(folderPath);
+
+    // Generate filename with timestamp
+    QString timestamp =
+            QDateTime::currentDateTime()
+            .toString("yyyyMMdd_HHmmss");
+
+    QString fileName = folderPath +
+            "/TwoWireTest_" + timestamp + ".pdf";
+
+    if (fileName.isEmpty())
+        return;
+
+    if (!fileName.endsWith(".pdf", Qt::CaseInsensitive))
+        fileName += ".pdf";
+
+    // Printer setup
+    QPrinter printer(QPrinter::HighResolution);
+
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(fileName);
+    printer.setPageSize(QPageSize(QPageSize::A4));
+    printer.setOrientation(QPrinter::Portrait);
+
+    printer.setPageMargins(
+                15, 15, 15, 25,
+                QPrinter::Millimeter);
+
+    printer.setResolution(72);
+
+    // Start painting
+    QPainter painter;
+
+    if (!painter.begin(&printer))
+    {
+        QMessageBox::warning(
+                    this,
+                    "PDF",
+                    "Unable to create PDF.");
+        return;
+    }
+
+    // Calculate page dimensions
+    QRect deviceRect =
+            printer.pageLayout().paintRectPixels(
+                printer.resolution());
+
+    const qreal pageWidth = deviceRect.width();
+    const qreal pageHeight = deviceRect.height();
+
+    const qreal bottom = pageHeight - 25;
+
+    // Count failed pins from Result column (column 8)
+    int failedPinsCount = 0;
+
+    for (int row = 0;
+         row < m_twoWireTestModel->rowCount();
+         ++row)
+    {
+        QStandardItem *item =
+                m_twoWireTestModel->item(row, 8);
+
+        if (item &&
+            item->text().compare(
+                "Fail", Qt::CaseInsensitive) == 0)
+        {
+            ++failedPinsCount;
+        }
+    }
+
+    int pageNumber = 1;
+
+    // 1. Draw report header
+    qreal y = drawTwoWireTestHeader(
+                painter,
+                pageWidth,
+                failedPinsCount);
+
+    // 2. Draw table
+    drawTwoWireTestTable(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                y,
+                pageNumber);
+
+    // 3. Draw notes, signatures and final page number
+    drawTwoWireTestFooter(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                y,
+                pageNumber);
+
+    // Finish PDF generation
+    painter.end();
+
+    QMessageBox::information(
+                this,
+                "PDF",
+                "PDF generated successfully.");
+}
+void MainWindow::drawTwoWireTestTable(
+        QPainter &painter,
+        QPrinter &printer,
+        qreal pageWidth,
+        qreal pageHeight,
+        qreal bottom,
+        qreal &y,
+        int &pageNumber)
+{
+    const qreal left = 0;
+
+    // Table column widths
+    const qreal proportions[] = {
+        0.055, 0.075, 0.175, 0.075, 0.175,
+        0.075, 0.085, 0.105, 0.080, 0.100
+    };
+
+    qreal colWidths[10];
+
+    for (int c = 0; c < 10; ++c)
+        colWidths[c] = pageWidth * proportions[c];
+
+    // Table headers
+    const QStringList headers = {
+        "S.No", "Cable", "Src Conn", "Src Pin",
+        "Dstn Conn", "Dstn\nPin",
+        "Exp\nValue", "Measured", "Result", "Remarks"
+    };
+
+    // Fonts
+    QFont normalFont("Times New Roman", 10);
+
+    QFont boldFont("Times New Roman", 10);
+    boldFont.setBold(true);
+
+    // Draw a table cell
+    auto drawCell = [&](
+            const QRectF &rect,
+            const QString &value,
+            const QFont &font,
+            const QColor &background)
+    {
+        painter.fillRect(rect, background);
+
+        painter.setPen(Qt::black);
+        painter.drawRect(rect);
+
+        painter.setFont(font);
+
+        QRectF textRect = rect.adjusted(3, 2, -3, -2);
+
+        painter.drawText(
+                    textRect,
+                    Qt::AlignCenter |
+                    Qt::TextWordWrap |
+                    Qt::TextWrapAnywhere,
+                    value);
+    };
+
+    // Draw the table header
+    auto drawTableHeader = [&](qreal &currentY)
+    {
+        const qreal headerHeight = 45;
+        qreal x = left;
+
+        for (int c = 0; c < 10; ++c)
+        {
+            QRectF cell(
+                        x,
+                        currentY,
+                        colWidths[c],
+                        headerHeight);
+
+            drawCell(
+                        cell,
+                        headers[c],
+                        boldFont,
+                        QColor(204, 204, 204));
+
+            x += colWidths[c];
+        }
+
+        currentY += headerHeight;
+    };
+
+    int totalRows = m_twoWireTestModel->rowCount();
+    int currentRow = 0;
+
+    // Draw table header on the first page
+    drawTableHeader(y);
+
+    // Draw the table rows
+    while (currentRow < totalRows)
+    {
+        // Calculate dynamic row height
+        qreal rowHeight = 24;
+
+        for (int c = 0; c < 10; ++c)
+        {
+            QString value;
+
+            QStandardItem *item =
+                    m_twoWireTestModel->item(currentRow, c);
+
+            if (item)
+                value = item->text();
+
+            QFont cellFont = normalFont;
+
+            if (c == 8 &&
+                (value.compare(
+                     "Pass", Qt::CaseInsensitive) == 0 ||
+                 value.compare(
+                     "Fail", Qt::CaseInsensitive) == 0))
+            {
+                cellFont = boldFont;
+            }
+
+            QFontMetricsF metrics(cellFont);
+
+            QRectF textRect = metrics.boundingRect(
+                        QRectF(
+                            0, 0,
+                            qMax(1, static_cast<int>(
+                                 colWidths[c] - 8)),
+                            10000),
+                        Qt::AlignCenter |
+                        Qt::TextWordWrap |
+                        Qt::TextWrapAnywhere,
+                        value);
+
+            rowHeight = qMax<qreal>(
+                        rowHeight,
+                        textRect.height() + 8.0);
+        }
+
+        // Start a new page if the row will not fit
+        if (y + rowHeight > bottom)
+        {
+            // Current page footer
+            painter.setFont(boldFont);
+            painter.setPen(Qt::black);
+
+            painter.drawText(
+                        QRectF(
+                            0,
+                            pageHeight - 25,
+                            pageWidth,
+                            15),
+                        Qt::AlignCenter,
+                        "Page " + QString::number(pageNumber));
+
+            printer.newPage();
+
+            ++pageNumber;
+
+            y = 0;
+
+            // Repeat table header on the new page
+            drawTableHeader(y);
+        }
+
+        // Draw current row
+        qreal x = left;
+
+        for (int c = 0; c < 10; ++c)
+        {
+            QString value;
+
+            QStandardItem *item =
+                    m_twoWireTestModel->item(currentRow, c);
+
+            if (item)
+                value = item->text();
+
+            QColor background = Qt::white;
+            QFont cellFont = normalFont;
+
+            // Result column: Pass / Fail
+            if (c == 8)
+            {
+                if (value.compare(
+                            "Pass", Qt::CaseInsensitive) == 0)
+                {
+                    background = QColor(144, 238, 144);
+                    cellFont = boldFont;
+                }
+                else if (value.compare(
+                                 "Fail", Qt::CaseInsensitive) == 0)
+                {
+                    background = QColor(255, 127, 127);
+                    cellFont = boldFont;
+                }
+            }
+
+            QRectF cell(
+                        x,
+                        y,
+                        colWidths[c],
+                        rowHeight);
+
+            drawCell(
+                        cell,
+                        value,
+                        cellFont,
+                        background);
+
+            x += colWidths[c];
+        }
+
+        y += rowHeight;
+        ++currentRow;
+    }
+    y+=20;
+}
+void MainWindow::drawTwoWireTestFooter(
+        QPainter &painter,
+        QPrinter &printer,
+        qreal pageWidth,
+        qreal pageHeight,
+        qreal bottom,
+        qreal &y,
+        int &pageNumber)
+{
+    Q_UNUSED(printer);
+
+    QString notes = ui->lineEdit_notes->text();
+
+    QFont normalFont("Times New Roman", 10);
+    QFont boldFont("Times New Roman", 10);
+    boldFont.setBold(true);
+
+    QFontMetricsF metrics(normalFont);
+
+    QRectF notesRect = metrics.boundingRect(
+        QRectF(0, 0, pageWidth, 10000),
+        Qt::TextWordWrap,
+        notes);
+
+    qreal notesHeight = qMax<qreal>(
+        25.0, notesRect.height() + 10.0);
+
+    qreal signatureHeight = 60.0;
+    qreal requiredHeight = notesHeight + signatureHeight + 30.0;
+
+    if (y + requiredHeight > bottom)
+    {
+        // Add page number to the current page before leaving it
+        painter.setFont(boldFont);
+        painter.setPen(Qt::black);
+
+        painter.drawText(
+            QRectF(0, pageHeight - 25, pageWidth, 15),
+            Qt::AlignCenter,
+            "Page " + QString::number(pageNumber));
+
+        printer.newPage();
+        ++pageNumber;
+
+        y = 40;
+    }
+
+    painter.setFont(normalFont);
+    painter.setPen(Qt::black);
+
+    painter.drawText(
+        QRectF(0, y, pageWidth, notesHeight),
+        Qt::AlignLeft | Qt::TextWordWrap,
+        "Notes: " + notes);
+
+    y += notesHeight + 80;
+
+    painter.setFont(boldFont);
+
+    painter.drawText(
+        QRectF(0, y, pageWidth / 3, 20),
+        Qt::AlignLeft,
+        "Test Performed By:");
+
+    painter.drawText(
+        QRectF(pageWidth / 3, y, pageWidth / 3, 20),
+        Qt::AlignHCenter,
+        "Prod. In-Charge");
+
+    painter.drawText(
+        QRectF(2 * pageWidth / 3, y, pageWidth / 3, 20),
+        Qt::AlignRight,
+        "Inspected By:");
+
+    // Page number on the final page
+    painter.setFont(boldFont);
+    painter.setPen(Qt::black);
+
+    painter.drawText(
+        QRectF(0, pageHeight - 25, pageWidth, 15),
+        Qt::AlignCenter,
+        "Page " + QString::number(pageNumber));
 }

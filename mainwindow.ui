@@ -17,7 +17,7 @@
    <string>Login Page</string>
   </property>
   <property name="windowIcon">
-   <iconset resource="images.qrc">
+   <iconset>
     <normaloff>:/new/prefix1/images/login.png</normaloff>:/new/prefix1/images/login.png</iconset>
   </property>
   <property name="styleSheet">
@@ -56,7 +56,7 @@
     gridline-color: #d9d9d9;</string>
       </property>
       <property name="currentIndex">
-       <number>15</number>
+       <number>0</number>
       </property>
       <widget class="QWidget" name="page">
        <layout class="QGridLayout" name="gridLayout_2">
@@ -798,7 +798,7 @@ QPushButton:hover:!pressed {
                 <string/>
                </property>
                <property name="icon">
-                <iconset resource="images.qrc">
+                <iconset>
                  <normaloff>:/new/prefix1/images/images.png</normaloff>:/new/prefix1/images/images.png</iconset>
                </property>
                <property name="iconSize">
@@ -5902,14 +5902,12 @@ QScrollBar::sub-page:horizontal
      <x>0</x>
      <y>0</y>
      <width>962</width>
-     <height>21</height>
+     <height>22</height>
     </rect>
    </property>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
  </widget>
- <resources>
-  <include location="images.qrc"/>
- </resources>
+ <resources/>
  <connections/>
 </ui>

@@ -27,6 +27,17 @@
 
 #include <QStandardPaths>
 
+#include <QPrinter>
+#include <QTextDocument>
+#include <QFileDialog>
+#include <QDate>
+#include <QTime>
+#include <QDir>
+#include <QUrl>
+#include <QPageSize>
+
+#include <QImage>
+#include <QBuffer>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
@@ -231,6 +242,36 @@ private slots:
 
       void on_pushButton_setColumnCalibrate_clicked();
 
+      void on_pushButton_saveTwoWirePdf_clicked();
+
+      void generateTwoWireTestPDF();
+
+      //QString imageToBase64(const QString &filePath);
+
+      void refreshPorts();
+
+
+      qreal drawTwoWireTestHeader(QPainter &painter,
+                                  qreal pageWidth,
+                                  int failedPinsCount);
+
+      void drawTwoWireTestTable(QPainter &painter,
+                                QPrinter &printer,
+                                qreal pageWidth,
+                                qreal pageHeight,
+                                qreal bottom,
+                                qreal &y,
+                                int &pageNumber);
+
+      void drawTwoWireTestFooter(QPainter &painter,
+                                 QPrinter &printer,
+                                 qreal pageWidth,
+                                 qreal pageHeight,
+                                 qreal bottom,
+                                 qreal &y,
+                                 int &pageNumber);
+
+
 public slots:
 
       void portStatus(const QString &data);
@@ -307,6 +348,10 @@ private:
 
     //Calibration Test
     QStandardItemModel *m_calibrationModel = nullptr;
+    int failedPinsCount = 0;
+
+
+
 
 };
 
