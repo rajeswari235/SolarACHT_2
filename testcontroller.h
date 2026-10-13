@@ -53,6 +53,7 @@ public:
         return exp;
     }
 
+    //Two Wire test ----------------------------
     void startTwoWireTransmission(const QByteArray &startPacket,
                                   const QVector<QByteArray> &packets);
 
@@ -63,10 +64,20 @@ public:
 
     void setTwoWireExpectedResults(int count);
 
-    //Self Test
+    bool isTwoWireTestRunning() const
+    {
+        return m_receivingTwoWireResults;
+    }
+
+    //Self Test --------------------------------
     void startSelfTest();
 
-    //Calibration Test
+    bool isSelfTestRunning() const
+    {
+        return m_selfTestRunning;
+    }
+
+    //Calibration Test -----------------------------
     void startCalibration();
     void sendCalibrationSlot(quint8 slotNumber);
     void sendNextCalibrationSlot();
@@ -76,6 +87,37 @@ public:
     {
         return m_currentCalibrationSlotIndex;
     }
+
+    bool isCalibrationRunning() const
+    {
+        return m_calibrationRunning;
+    }
+
+    //Insulation Test Packet
+    void sendInsulationStartPacket(
+        quint16 numberOfPackets,
+        quint16 numberOfLooms,
+        float insulationVoltage,
+        float resistanceThreshold,
+        quint8 testBetweenConnectors,
+        quint8 testType,
+        const QVector<QByteArray> &packets);
+
+    bool isInsuIsoTestRunning() const
+    {
+        return m_receivingInsulationResults;
+    }
+
+    void setCurrentInsulationTotalNets(int totalNets)
+    {
+        m_currentInsulationTotalNets = totalNets;
+    }
+
+    void setInsulationLoomNetCounts(const QVector<int> &netCounts)
+    {
+        m_insulationNetsPerLoom = netCounts;
+    }
+
 
     inline void pauseFor(int milliseconds) {
         QEventLoop loop;
@@ -95,11 +137,12 @@ signals:
     void portOpening(const QString &);
     void executeWriteToNotes(const QString &dataNotes);
 
+    //Two Wire test Signals -----------------------
     void twoWireResultReceived(float value, int index);
 
     void twoWireResultsCompleted();
 
-    //Self Test Signals
+    //Self Test Signals ----------------------
 
     void selfTestSlotStarted(int slotNumber);
 
@@ -112,7 +155,7 @@ signals:
     void selfTestResultsCompleted(
             const QByteArray &allResults);
 
-    //Calibration Test
+    //Calibration Test Signals---------------------
     void calibrationSlotReceived(
             int slotNumber,
             const QByteArray &slotData);
@@ -121,6 +164,19 @@ signals:
             int slotNumber);
 
     void calibrationCompleted();
+
+    //Insu/Iso test Signals -----------------------
+
+    void insulationLoomPassed(
+            int loomNo);
+
+    void insulationLoomFailed(
+            int loomNo,
+            const QByteArray &loomData);
+
+    void insulationResultsCompleted();
+
+    void insulationNetMarkerReceived(int loomNo, int totalNets);
 
 
 private:
@@ -166,6 +222,26 @@ private:
     QVector<quint8> m_calibrationSlots;
     int m_currentCalibrationSlotIndex = -1;
     bool m_calibrationRunning = false;
+
+    //Insulation Test
+    QVector<QByteArray> m_insulationPackets;
+
+    int m_currentInsulationPacket = 0;
+
+    bool m_waitingForInsulationStartAck = false;
+    bool m_waitingForInsulationPacketAck = false;
+    bool m_receivingInsulationResults = false;
+
+    QVector<float> m_insulationResults;
+
+    QByteArray m_currentInsulationLoomData;
+    int m_currentInsulationLoom = 0;
+
+    int m_currentInsulationTotalNets = 0;
+    int m_insulationNetMarkersSeen = 0;
+
+    QVector<int> m_insulationNetsPerLoom;
+
 };
 
 #endif // TESTCONTROLLER_H

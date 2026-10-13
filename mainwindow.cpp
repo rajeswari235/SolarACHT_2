@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include "testcontroller.h"
+#include <QToolButton>
 
 #include <QPainter>
 #include <QAbstractTextDocumentLayout>
@@ -8,7 +9,8 @@
 QFile MainWindow::logFile;
 QTextStream MainWindow::logStream;
 
-#include <QToolButton>
+
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -171,6 +173,27 @@ MainWindow::MainWindow(QWidget *parent)
             &TestController::calibrationCompleted,
             this,
             &MainWindow::onCalibrationCompleted);
+
+    // Insulation/Isolation test signals
+    connect(test,
+            &TestController::insulationLoomPassed,
+            this,
+            &MainWindow::onInsulationLoomPassed);
+
+    connect(test,
+            &TestController::insulationLoomFailed,
+            this,
+            &MainWindow::onInsulationLoomFailed);
+
+    connect(test,
+            &TestController::insulationResultsCompleted,
+            this,
+            &MainWindow::onInsulationResultsCompleted);
+
+    connect(test,
+            &TestController::insulationNetMarkerReceived,
+            this,
+            &MainWindow::onInsulationNetMarkerReceived);
 
 }
 MainWindow::~MainWindow()
@@ -1037,7 +1060,7 @@ bool MainWindow::processCsvFile(const QString &fileName,
                 return false;
 
             //-------------------------------------------------
-            // Convert Logical TP(1-16) -> Physical TP(1-32)
+            // Convert Logical TP(1-16) -> Physical TP (Edge Case TP15 -> 29,31 HANDLED)
             //-------------------------------------------------
 
             int tpNo = pCon.section('-', 1).toInt();
@@ -1049,7 +1072,17 @@ bool MainWindow::processCsvFile(const QString &fileName,
             }
             else
             {
-                tpNo = tpNo * 2;
+                if (tpNo == 15)
+                {
+                    // TP15 has SLOT 29 and SLOT 31.
+                    // SLOT 30 is physically missing.
+                    tpNo = 31;
+                }
+                else
+                {
+                    tpNo = tpNo * 2;
+                }
+
                 pPin -= 64;
             }
 
@@ -1208,60 +1241,130 @@ bool MainWindow::savePatchToDb(const QString &cableName)
 
     return true;
 }
-bool MainWindow::validateHarnessData(const QVector<QString> &cableTemp,
-                                     const QVector<QString> &sourceConTemp,
-                                     const QVector<QString> &sourcePinTemp,
-                                     const QVector<QString> &destConTemp,
-                                     const QVector<QString> &destPinTemp,
-                                     const QVector<QString> &expTemp)
+
+bool MainWindow::validateHarnessData(
+        const QVector<QString> &cableTemp,
+        const QVector<QString> &sourceConTemp,
+        const QVector<QString> &sourcePinTemp,
+        const QVector<QString> &destConTemp,
+        const QVector<QString> &destPinTemp,
+        const QVector<QString> &expTemp)
 {
-    QVector<QString> sourceMiss, destMiss;
     QString extraLog;
+
+    // =====================================================
+    // Validate Source / Destination against Patch data
+    // =====================================================
+
+    QStringList missingRows;
 
     for (int i = 0; i < sourceConTemp.size(); i++)
     {
-        int matchSrc = 0, matchDst = 0;
+        int matchSrc = 0;
+        int matchDst = 0;
 
-        for (int j = 0; j < userConList.size(); j++) {
+        for (int j = 0; j < userConList.size(); j++)
+        {
             if (sourceConTemp[i] == userConList[j] &&
-                    sourcePinTemp[i] == userPinList[j])
+                sourcePinTemp[i] == userPinList[j])
+            {
                 matchSrc++;
+            }
 
             if (destConTemp[i] == userConList[j] &&
-                    destPinTemp[i] == userPinList[j])
+                destPinTemp[i] == userPinList[j])
+            {
                 matchDst++;
+            }
         }
 
-        if (matchSrc == 0)
-            sourceMiss.append(sourceConTemp[i] + "-" + sourcePinTemp[i]);
+        // -------------------------------------------------
+        // Check missing Source / Destination
+        // -------------------------------------------------
 
-        if (matchDst == 0)
-            destMiss.append(destConTemp[i] + "-" + destPinTemp[i]);
+        if (matchSrc == 0 || matchDst == 0)
+        {
+            QString problem;
+
+            if (matchSrc == 0 && matchDst == 0)
+            {
+                problem =
+                    "Source and Destination not found in Patch data";
+            }
+            else if (matchSrc == 0)
+            {
+                problem =
+                    "Source not found in Patch data";
+            }
+            else
+            {
+                problem =
+                    "Destination not found in Patch data";
+            }
+
+            QString log =
+                QString(
+                    "Row %1 | Cable: %2 | "
+                    "Source: %3 - %4 | "
+                    "Destination: %5 - %6 | "
+                    "%7")
+                .arg(i + 1)
+                .arg(cableTemp[i])
+                .arg(sourceConTemp[i])
+                .arg(sourcePinTemp[i])
+                .arg(destConTemp[i])
+                .arg(destPinTemp[i])
+                .arg(problem);
+
+            missingRows.append(log);
+        }
+
+        // -------------------------------------------------
+        // Extra source / destination checks
+        // -------------------------------------------------
 
         //        if (matchSrc > 1)
-        //            extraLog += QString("⚠ EXTRA source append at index %1: %2-%3\n")
-        //                            .arg(i).arg(sourceConTemp[i]).arg(sourcePinTemp[i]);
+        //            extraLog +=
+        //                QString(
+        //                    "⚠ EXTRA source append at index %1: %2-%3\n")
+        //                .arg(i)
+        //                .arg(sourceConTemp[i])
+        //                .arg(sourcePinTemp[i]);
 
         //        if (matchDst > 1)
-        //            extraLog += QString("⚠ EXTRA destination append at index %1: %2-%3\n")
-        //                            .arg(i).arg(destConTemp[i]).arg(destPinTemp[i]);
+        //            extraLog +=
+        //                QString(
+        //                    "⚠ EXTRA destination append at index %1: %2-%3\n")
+        //                .arg(i)
+        //                .arg(destConTemp[i])
+        //                .arg(destPinTemp[i]);
     }
 
-    if (!extraLog.isEmpty()) {
+    // =====================================================
+    // Extra validation errors
+    // =====================================================
+
+    if (!extraLog.isEmpty())
+    {
         ui->textEdit_ErrorLog->append(extraLog);
         writeToNotes(extraLog);
+
         return false;
     }
 
-    if (!sourceMiss.isEmpty() || !destMiss.isEmpty()) {
-        QString missingLog =
-                "Missing Source: " +
-                QStringList(sourceMiss.begin(), sourceMiss.end()).join(", ") + " | " +
-                "Missing Destination: " +
-                QStringList(destMiss.begin(), destMiss.end()).join(", ");
+    // =====================================================
+    // Missing Source / Destination
+    // =====================================================
 
-        writeToNotes("❌ " + missingLog);
-        ui->textEdit_ErrorLog->append("❌ " + missingLog);
+    if (!missingRows.isEmpty())
+    {
+        QString missingLog =
+            "❌ HARNESS VALIDATION FAILED\n\n" +
+            missingRows.join("\n");
+
+        writeToNotes(missingLog);
+        ui->textEdit_ErrorLog->append(missingLog);
+
         return false;
     }
 
@@ -1285,7 +1388,7 @@ bool MainWindow::validateHarnessData(const QVector<QString> &cableTemp,
     // =====================================================
 
     QRegularExpression expRegex(
-        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s*±\s*[0-9]+[KM]?)$)",
+        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s\*±\s\*[0-9]+[KM]?)$)",
         QRegularExpression::CaseInsensitiveOption);
 
     for (int i = 0; i < expTemp.size(); i++)
@@ -1294,38 +1397,56 @@ bool MainWindow::validateHarnessData(const QVector<QString> &cableTemp,
 
         if (!expRegex.match(v).hasMatch())
         {
-            writeToNotes(QString("Invalid expValue at index %1: %2")
-                             .arg(i).arg(v));
+            writeToNotes(
+                QString(
+                    "Invalid expValue at index %1: %2")
+                .arg(i)
+                .arg(v));
+
             ui->textEdit_ErrorLog->append(
-                "Invalid expValue at index " + QString::number(i) +
-                ": " +v
-            );
+                "Invalid expValue at index " +
+                QString::number(i) +
+                ": " +
+                v);
+
             return false;
         }
     }
 
-    // ---------------------------------------------------------
+    // =====================================================
     // PRINT ALL HARNESS DATA AFTER SUCCESSFUL VALIDATION
-    // ---------------------------------------------------------
-    writeToNotes("######## HARNESS DATA (VALIDATED) ########");
+    // =====================================================
 
-    for (int i = 0; i < sourceConTemp.size(); i++) {
+    writeToNotes(
+        "######## HARNESS DATA (VALIDATED) ########");
 
-        QString log = QString(
-                    "HARNESS Line OK (%1): Cable: %2 , SRC: %3-%4 → DEST: %5-%6 , exp: %7")
-                .arg(i + 1)
-                .arg(cableTemp[i])              // <--- NEW
-                .arg(sourceConTemp[i])
-                .arg(sourcePinTemp[i])
-                .arg(destConTemp[i])
-                .arg(destPinTemp[i])
-                .arg(expTemp[i]);
+    for (int i = 0;
+         i < sourceConTemp.size();
+         i++)
+    {
+        QString log =
+            QString(
+                "HARNESS Line OK (%1): "
+                "Cable: %2 , "
+                "SRC: %3-%4 → "
+                "DEST: %5-%6 , "
+                "exp: %7")
+            .arg(i + 1)
+            .arg(cableTemp[i])
+            .arg(sourceConTemp[i])
+            .arg(sourcePinTemp[i])
+            .arg(destConTemp[i])
+            .arg(destPinTemp[i])
+            .arg(expTemp[i]);
 
         writeToNotes(log);
     }
 
-    writeToNotes("###########################################");
-    writeToNotes("✅ Harness data validated successfully.");
+    writeToNotes(
+        "###########################################");
+
+    writeToNotes(
+        "✅ Harness data validated successfully.");
 
     return true;
 }
@@ -1622,12 +1743,22 @@ void MainWindow::loadPatchTable(const QString &tableName)
 
             if(col == 4)       // Patch Con
             {
-                int tpNo = value.section('-',1).toInt();
+                int tpNo = value.section('-', 1).toInt();
 
-                if(tpNo % 2)
+                // Special case:
+                // TP-31 is the second half of logical TP-15
+                if(tpNo == 31)
+                {
+                    tpNo = 15;
+                }
+                else if(tpNo % 2)
+                {
                     tpNo = (tpNo + 1) / 2;
+                }
                 else
+                {
                     tpNo /= 2;
+                }
 
                 value = QString("TP-%1").arg(tpNo);
             }
@@ -1635,11 +1766,20 @@ void MainWindow::loadPatchTable(const QString &tableName)
             {
                 int pin = value.toInt();
 
-                QString dbCon = patchModel->index(row,4).data().toString();
-                int tpNo = dbCon.section('-',1).toInt();
+                QString dbCon =
+                        patchModel->index(row, 4)
+                        .data()
+                        .toString();
 
-                if(tpNo % 2 == 0)
+                int tpNo =
+                        dbCon.section('-', 1).toInt();
+
+                // Even physical TP = second half
+                // TP-31 is also the second half of TP-15
+                if(tpNo % 2 == 0 || tpNo == 31)
+                {
                     pin += 64;
+                }
 
                 value = QString::number(pin);
             }
@@ -2199,34 +2339,145 @@ void MainWindow::processTwoWireResults()
                 results[row];
 
         // =============================================
-        // Convert measured value to readable format
+        // Get calibration values
+        // =============================================
+
+        int sourceConnector =
+                test->get_k_SourceCon()[row]
+                .section('-', 1)
+                .toInt();
+
+        int sourcePin =
+                test->get_k_SourcePin()[row]
+                .toInt();
+
+        int destinationConnector =
+                test->get_k_DestinationCon()[row]
+                .section('-', 1)
+                .toInt();
+
+        int destinationPin =
+                test->get_k_DestinationPin()[row]
+                .toInt();
+
+        double sourceCalibration = 0.0;
+        double destinationCalibration = 0.0;
+
+        QSqlQuery calibrationQuery(db);
+
+        // Source
+        calibrationQuery.prepare(
+            "SELECT calibrationValue "
+            "FROM calibrationData "
+            "WHERE connector = :connector "
+            "AND pin = :pin");
+
+        calibrationQuery.bindValue(
+            ":connector",
+            sourceConnector);
+
+        calibrationQuery.bindValue(
+            ":pin",
+            sourcePin);
+
+        if (calibrationQuery.exec() &&
+            calibrationQuery.next())
+        {
+            QString value =
+                    calibrationQuery.value(
+                        "calibrationValue")
+                    .toString()
+                    .trimmed();
+
+            if (value != "SLOT MISS")
+            {
+                sourceCalibration =
+                        value.toDouble();
+            }
+        }
+
+        // Destination
+        calibrationQuery.finish();
+
+        calibrationQuery.bindValue(
+            ":connector",
+            destinationConnector);
+
+        calibrationQuery.bindValue(
+            ":pin",
+            destinationPin);
+
+        if (calibrationQuery.exec() &&
+            calibrationQuery.next())
+        {
+            QString value =
+                    calibrationQuery.value(
+                        "calibrationValue")
+                    .toString()
+                    .trimmed();
+
+            if (value != "SLOT MISS")
+            {
+                destinationCalibration =
+                        value.toDouble();
+            }
+        }
+
+        // =============================================
+        // Calibration Formula
+        // =============================================
+
+        float convertedMeasuredOhms =
+                measuredOhms
+                - (sourceCalibration +
+                   destinationCalibration);
+
+        // =============================================
+        // Log calibration calculation
+        // =============================================
+
+        writeToNotes(
+            QString(
+                "Two Wire Result %1 | "
+                "HW Measured: %2 Ω | "
+                "SRC Calibration: %3 Ω | "
+                "DST Calibration: %4 Ω | "
+                "Converted: %5 Ω")
+            .arg(row + 1)
+            .arg(measuredOhms, 0, 'f', 6)
+            .arg(sourceCalibration, 0, 'f', 6)
+            .arg(destinationCalibration, 0, 'f', 6)
+            .arg(convertedMeasuredOhms, 0, 'f', 6));
+
+        // =============================================
+        // Convert calibrated measured value to readable format
         // =============================================
 
         QString measuredText;
 
-        if (qAbs(measuredOhms) >= 1000000000.0)
+        if (qAbs(convertedMeasuredOhms) >= 1000000000.0)
         {
             measuredText =
                     QString::number(
-                        measuredOhms / 1000000000.0,
+                        convertedMeasuredOhms / 1000000000.0,
                         'f',
                         3)
                     + "GΩ";
         }
-        else if (qAbs(measuredOhms) >= 1000000.0)
+        else if (qAbs(convertedMeasuredOhms) >= 1000000.0)
         {
             measuredText =
                     QString::number(
-                        measuredOhms / 1000000.0,
+                        convertedMeasuredOhms / 1000000.0,
                         'f',
                         3)
                     + "MΩ";
         }
-        else if (qAbs(measuredOhms) >= 1000.0)
+        else if (qAbs(convertedMeasuredOhms) >= 1000.0)
         {
             measuredText =
                     QString::number(
-                        measuredOhms / 1000.0,
+                        convertedMeasuredOhms / 1000.0,
                         'f',
                         3)
                     + "KΩ";
@@ -2235,7 +2486,7 @@ void MainWindow::processTwoWireResults()
         {
             measuredText =
                     QString::number(
-                        measuredOhms,
+                        convertedMeasuredOhms,
                         'f',
                         3)
                     + "Ω";
@@ -2326,10 +2577,19 @@ void MainWindow::processTwoWireResults()
                     remarks);
     }
 
+    ui->tableView_twoWireTest->scrollTo(
+                m_twoWireTestModel->index(0,0),
+                QAbstractItemView::PositionAtTop);
+
     writeToNotes(
         QString("Two Wire comparison completed. "
                 "Results: %1")
         .arg(resultCount));
+
+    QMessageBox::information(
+                this,
+                "Two Wire Test",
+                "Two Wire Test Completed Successfully.");
 }
 
 bool MainWindow::checkTwoWireExpected(
@@ -3163,10 +3423,19 @@ void MainWindow::onCalibrationCompleted()
              QAbstractItemView::PositionAtTop);
 
 
-    QMessageBox::information(
-        this,
-        "Calibration Test",
-                "Calibration data received successfully.");
+     QMessageBox::StandardButton reply =
+             QMessageBox::question(
+                 this,
+                 "Calibration Test",
+                 "Calibration Test Completed Successfully.\n\n"
+                 "Do you want to save the calibration data in the database?",
+                 QMessageBox::Yes |
+                 QMessageBox::No);
+
+     if (reply == QMessageBox::Yes)
+     {
+         on_pushButton_calibrationSave_clicked();
+     }
 }
 
 float MainWindow::calibrationBytesToFloat(
@@ -3184,6 +3453,580 @@ float MainWindow::calibrationBytesToFloat(
     memcpy(&value, &bits, sizeof(value));
 
     return value;
+}
+
+void MainWindow::onInsulationLoomPassed(int loomNo)
+{
+    qDebug() << "UI: Insulation Loom"
+             << loomNo
+             << "PASS";
+
+    QStandardItemModel *model =
+        qobject_cast<QStandardItemModel *>(
+            ui->tableView_InsuIso->model());
+
+    if(!model)
+        return;
+
+    for(int row = 0;
+        row < model->rowCount();
+        ++row)
+    {
+        int tableLoomNo =
+                model->item(row, 1)
+                ->text()
+                .toInt();
+
+        if(tableLoomNo == loomNo)
+        {
+            // Result column
+            model->item(row, 7)
+                ->setText("Pass");
+
+            // Fail Net With Resistance
+            model->item(row, 5)
+                ->setText("-");
+
+            // Light green Cell
+            model->item(row, 7)
+                ->setBackground(
+                    QColor(200, 255, 200));
+
+        }
+    }
+
+    ui->tableView_InsuIso->resizeRowsToContents();
+
+    ui->tableView_InsuIso->resizeRowsToContents();
+
+    // Position the last row of this loom in the center
+    for(int row = model->rowCount() - 1; row >= 0; --row)
+    {
+        int tableLoomNo =
+                model->item(row, 1)->text().toInt();
+
+        if(tableLoomNo == loomNo)
+        {
+            ui->tableView_InsuIso->scrollTo(
+                model->index(row, 7),
+                QAbstractItemView::PositionAtCenter);
+
+            break;
+        }
+    }
+
+    //For Progress Bar
+    if(totalInsulationLooms > 0)
+    {
+        currentPercentage += 100.0 / totalInsulationLooms;
+        currentLoomNetProgress = 0.0;
+
+        ui->progressBar_InsuIsoTest->setValue(
+            qRound(qMin(currentPercentage, 100.0)));
+    }
+}
+
+void MainWindow::onInsulationLoomFailed(
+        int loomNo,
+        const QByteArray &loomData)
+{
+    qDebug() << "UI: Insulation Loom"
+             << loomNo
+             << "FAIL";
+
+    qDebug() << "Failed Loom Data:"
+             << loomData.toHex(' ').toUpper();
+
+    QStandardItemModel *model =
+        qobject_cast<QStandardItemModel *>(
+            ui->tableView_InsuIso->model());
+
+    if(!model)
+        return;
+
+
+    // First mark all rows of this loom as PASS
+    for(int row = 0; row < model->rowCount(); ++row)
+    {
+        int tableLoomNo = model->item(row, 1)->text().toInt();
+
+        if(tableLoomNo == loomNo)
+        {
+            model->item(row, 7)->setText("Pass");
+            model->item(row, 5)->setText("-");
+
+            // Only the Result column becomes green
+            model->item(row, 7)->setBackground(
+                QColor(200, 255, 200));
+        }
+    }
+
+    // --------------------------------------------------
+    // Find all resistance records
+    //
+    // Format:
+    // 2E 2E + 4 byte float
+    // --------------------------------------------------
+
+    const QByteArray failedMarker =
+            QByteArray::fromHex("2E2E");
+
+    QVector<float> resistances;
+
+    int pos = 0;
+
+    while(pos + 6 <= loomData.size())
+    {
+        if(loomData.mid(pos, 2) == failedMarker)
+        {
+            QByteArray resistanceBytes =
+                    loomData.mid(pos + 2, 4);
+
+            quint32 bits =
+                    (static_cast<quint8>(resistanceBytes[3]) << 24) |
+                    (static_cast<quint8>(resistanceBytes[2]) << 16) |
+                    (static_cast<quint8>(resistanceBytes[1]) << 8)  |
+                     static_cast<quint8>(resistanceBytes[0]);
+
+            float resistance = 0.0f;
+
+            memcpy(&resistance,
+                   &bits,
+                   sizeof(float));
+
+            resistances.append(resistance);
+
+            qDebug() << "Resistance:"
+                     << resistance;
+
+            pos += 6;
+        }
+        else
+        {
+            pos++;
+        }
+    }
+
+
+    // --------------------------------------------------
+    // Find locator pairs
+    //
+    // Example:
+    // 04 00 08 00
+    // -> Net 4 <-> Net 8
+    // --------------------------------------------------
+
+    QVector<QPair<int,int>> locatorPairs;
+
+    pos = 0;
+
+    while(pos + 4 <= loomData.size())
+    {
+        // Skip 2F pass indicators
+        if(static_cast<quint8>(loomData[pos]) == 0x2F)
+        {
+            pos++;
+            continue;
+        }
+
+        // Skip resistance record
+        if(pos + 2 <= loomData.size() &&
+           loomData.mid(pos, 2) == failedMarker)
+        {
+            pos += 6;
+            continue;
+        }
+
+        quint16 net1 =
+                static_cast<quint8>(loomData[pos]) |
+                (static_cast<quint8>(loomData[pos + 1]) << 8);
+
+        quint16 net2 =
+                static_cast<quint8>(loomData[pos + 2]) |
+                (static_cast<quint8>(loomData[pos + 3]) << 8);
+
+        locatorPairs.append(
+            qMakePair(
+                static_cast<int>(net1),
+                static_cast<int>(net2)));
+
+        qDebug() << "Locator Pair:"
+                 << net1
+                 << "<->"
+                 << net2;
+
+        pos += 4;
+    }
+
+
+    // --------------------------------------------------
+    // Resistance <-> locator pair
+    // --------------------------------------------------
+
+    int count =
+            qMin(resistances.size(),
+                 locatorPairs.size());
+
+    for(int i = 0; i < count; ++i)
+    {
+        float resistance =
+                resistances[i];
+
+        int net1 =
+                locatorPairs[i].first;
+
+        int net2 =
+                locatorPairs[i].second;
+
+
+        // Smaller net becomes the row
+        int rowNet =
+                qMin(net1, net2);
+
+        // Larger net is displayed
+        int failedNet =
+                qMax(net1, net2);
+
+
+        QString failText =
+                QString("%1 -> %2")
+                    .arg(failedNet)
+                    .arg(resistance);
+
+
+        qDebug()
+            << "Failure:"
+            << "Net"
+            << rowNet
+            << "->"
+            << failedNet
+            << "Resistance"
+            << resistance;
+
+
+        // --------------------------------------------------
+        // Find corresponding row
+        // --------------------------------------------------
+
+        for(int row = 0;
+            row < model->rowCount();
+            ++row)
+        {
+            int tableLoomNo =
+                    model->item(row, 1)
+                        ->text()
+                        .toInt();
+
+            int tableNetNo =
+                    model->item(row, 2)
+                        ->text()
+                        .toInt();
+
+            if(tableLoomNo == loomNo &&
+               tableNetNo == rowNet)
+            {
+                QStandardItem *failItem =
+                        model->item(row, 5);
+
+                QStandardItem *resultItem =
+                        model->item(row, 7);
+
+
+                // Multiple failures can belong
+                // to the same source net.
+                if(failItem->text() == "-")
+                {
+                    failItem->setText(failText);
+                }
+                else
+                {
+                    failItem->setText(
+                        failItem->text()
+                        + "\n"
+                        + failText);
+                }
+
+                // Result
+                resultItem->setText("Fail");
+
+
+                // -----------------------------------------
+                // Light red for failed row cell
+                // -----------------------------------------
+
+                model->item(row, 7)
+                    ->setBackground(
+                        QColor(255, 200, 200));
+
+                break;
+            }
+        }
+    }
+
+
+    ui->tableView_InsuIso->resizeRowsToContents();
+
+    // Position the last row of this failed loom in the center
+    for(int row = model->rowCount() - 1; row >= 0; --row)
+    {
+        int tableLoomNo =
+                model->item(row, 1)->text().toInt();
+
+        if(tableLoomNo == loomNo)
+        {
+            ui->tableView_InsuIso->scrollTo(
+                model->index(row, 7),
+                QAbstractItemView::PositionAtCenter);
+
+            break;
+        }
+    }
+
+    //For Progress Bar
+    if(totalInsulationLooms > 0)
+    {
+        currentPercentage += 100.0 / totalInsulationLooms;
+        currentLoomNetProgress = 0.0;
+
+        ui->progressBar_InsuIsoTest->setValue(
+            qRound(qMin(currentPercentage, 100.0)));
+    }
+}
+
+void MainWindow::onInsulationResultsCompleted()
+{
+    qDebug()
+            << "UI: Test Completed";
+
+    // Move table to the top
+    ui->tableView_InsuIso->scrollToTop();
+
+    QMessageBox::information(
+                this,
+                "Test",
+                "Test Completed Successfully.");
+}
+
+void MainWindow::onInsulationNetMarkerReceived(
+    int loomNo, int totalNets)
+{
+    Q_UNUSED(loomNo);
+
+    if(totalInsulationLooms <= 0 || totalNets <= 0)
+        return;
+
+    // Progress allocated to one loom
+    double loomAllowance =
+        100.0 / totalInsulationLooms;
+
+    // Progress allocated to one net
+    double progressPerNet =
+        loomAllowance / totalNets;
+
+    // Advance progress for this net
+    currentLoomNetProgress += progressPerNet;
+
+    // Never exceed this loom's allocated progress
+    currentLoomNetProgress =
+        qMin(currentLoomNetProgress, loomAllowance);
+
+    double progress =
+        currentPercentage + currentLoomNetProgress;
+
+    ui->progressBar_InsuIsoTest->setValue(
+        qRound(qMin(progress, 100.0)));
+
+    qDebug() << "Current percentage:" << currentPercentage
+             << "Current loom net progress:" << currentLoomNetProgress
+             << "Progress bar:"
+             << ui->progressBar_InsuIsoTest->value();
+}
+
+void MainWindow::populateInsulationTable(
+    const QVector<InsulationTableNet> &nets,
+    const QVariantList &patchData)
+{
+    QStandardItemModel *model =
+        new QStandardItemModel(this);
+
+    model->setColumnCount(9);
+
+    model->setHorizontalHeaderLabels({
+        "S.No",
+        "Loom No",
+        "Net No",
+        "Source Net",
+        "Destination Net",
+        "Failed Net (Ω)",
+        "Exp Value",
+        "Result",
+        "Remarks"
+    });
+
+    int serialNo = 1;
+
+    for(const InsulationTableNet &net : nets)
+    {
+        int netNo = net.netNo + 1;
+
+        /*
+         * Last net of a loom has no destination net,
+         * so there is nothing to test against after it.
+         */
+
+        QString destinationNets;
+
+        for(const InsulationTableNet &other : nets)
+        {
+            if(other.loomNo != net.loomNo)
+                continue;
+
+            int otherNetNo = other.netNo + 1;
+
+            if(otherNetNo > netNo)
+            {
+                if(!destinationNets.isEmpty())
+                    destinationNets += ", ";
+
+                destinationNets +=
+                    QString::number(otherNetNo);
+            }
+        }
+
+        if(destinationNets.isEmpty())
+            continue;
+
+        QList<QStandardItem *> row;
+
+        row.append(
+            new QStandardItem(
+                QString::number(serialNo)));
+
+        row.append(
+            new QStandardItem(
+                QString::number(net.loomNo)));
+
+        row.append(
+            new QStandardItem(
+                QString::number(netNo)));
+
+        QString sourceNet;
+
+        for(const auto &endpoint : net.endpoints)
+        {
+            if(!sourceNet.isEmpty())
+                sourceNet += "\n";
+
+            sourceNet += getActualConnectorName(
+                patchData,
+                endpoint.first,
+                endpoint.second);
+        }
+
+        row.append(
+            new QStandardItem(sourceNet));
+
+        // Destination Net
+        row.append(
+            new QStandardItem(destinationNets));
+
+        // Fail Net With Resistance
+        row.append(
+            new QStandardItem("-"));
+
+        // Expected value
+        QString expValue =
+            ">" +
+            ui->doubleSpinBox_ResistanceThreshold
+                ->text();
+
+        row.append(
+            new QStandardItem(expValue));
+
+        // Result
+        row.append(
+            new QStandardItem("Waiting..."));
+
+        // Remarks
+        row.append(
+            new QStandardItem(""));
+
+        model->appendRow(row);
+
+        serialNo++;
+    }
+
+    ui->tableView_InsuIso->setModel(model);
+
+    ui->tableView_InsuIso->setWordWrap(true);
+
+    ui->tableView_InsuIso->setTextElideMode(
+        Qt::ElideNone);
+
+    QHeaderView *header =
+        ui->tableView_InsuIso->horizontalHeader();
+
+    // Compact columns
+    header->setSectionResizeMode(0, QHeaderView::ResizeToContents); // S.No
+    header->setSectionResizeMode(1, QHeaderView::ResizeToContents); // Loom No
+    header->setSectionResizeMode(2, QHeaderView::ResizeToContents); // Net No
+
+    // Remaining columns stretch to fill available space
+    header->setSectionResizeMode(3, QHeaderView::Stretch); // Source Net
+    header->setSectionResizeMode(4, QHeaderView::Stretch); // Destination Net
+    header->setSectionResizeMode(5, QHeaderView::Stretch); // Failed Net (Ω)
+    header->setSectionResizeMode(6, QHeaderView::Stretch); // Exp Value
+    header->setSectionResizeMode(7, QHeaderView::Stretch); // Result
+    header->setSectionResizeMode(8, QHeaderView::Stretch); // Remarks
+
+    // Wrapping
+    ui->tableView_InsuIso->setWordWrap(true);
+    ui->tableView_InsuIso->setTextElideMode(Qt::ElideNone);
+
+    // No horizontal scrolling
+    ui->tableView_InsuIso->setHorizontalScrollBarPolicy(
+        Qt::ScrollBarAlwaysOff);
+
+    ui->tableView_InsuIso->resizeRowsToContents();
+
+    // Force the table to the top
+    ui->tableView_InsuIso->scrollToTop();
+}
+
+QString MainWindow::getActualConnectorName(
+    const QVariantList &patchData,
+    const QString &hardwareCon,
+    int hardwarePin)
+{
+    for(const QVariant &v : patchData)
+    {
+        QVariantMap m = v.toMap();
+
+        QString patchCon =
+            m["patchCon"].toString();
+
+        int patchPin =
+            m["patchPin"].toInt();
+
+        if(patchCon == hardwareCon &&
+           patchPin == hardwarePin)
+        {
+            QString userCon =
+                m["userCon"].toString();
+
+            QString userPin =
+                m["userPin"].toString();
+
+            return QString("(\"%1\", \"%2\")")
+                .arg(userCon)
+                .arg(userPin);
+        }
+    }
+
+    // If mapping is not found
+    return QString("(\"%1\", \"%2\")")
+        .arg(hardwareCon)
+        .arg(hardwarePin);
 }
 
 void MainWindow::onPortSelected(const QString &portName)
@@ -3306,13 +4149,16 @@ void MainWindow::on_pushButton_run_clicked()
     // Two Wire BLOCK End------------------------
 
 
-    // Insulation Packet logic start ------------------------------------------------
+    // Insulation/Isolation Packet logic start ------------------------------------------------
 
-    if(ui->comboBox_test->currentText() == "Insulation")
+    if(ui->comboBox_test->currentText() == "Insulation" ||
+       ui->comboBox_test->currentText() == "Isolation")
     {
         writeToNotes("======================================");
         writeToNotes("STEP-1 : DIVIDING HARNESS INTO LOOMS");
         writeToNotes("======================================");
+
+        QVector<int> insulationNetsPerLoom;
 
         QMap<QString, QVector<HarnessConnection>> looms;
 
@@ -3337,6 +4183,14 @@ void MainWindow::on_pushButton_run_clicked()
             looms[cable[i]].append(row);
         }
 
+        // Final storer
+        QVector<QByteArray> loomPackets;
+        QVector<InsulationTableNet> tableNets;
+
+        //Loom wise net creation
+
+        quint16 loomNumber = 1;
+
         // Printing Looms
         for(auto it = looms.begin(); it != looms.end(); ++it)
         {
@@ -3357,13 +4211,6 @@ void MainWindow::on_pushButton_run_clicked()
 
         writeToNotes("");
         writeToNotes(QString("Total Looms : %1").arg(looms.size()));
-
-        // Final storer
-        QVector<QByteArray> loomPackets;
-
-        //Loom wise net creation
-
-        quint16 loomNumber = 0;
 
         for(auto it = looms.begin(); it != looms.end(); ++it)
         {
@@ -3471,6 +4318,20 @@ void MainWindow::on_pushButton_run_clicked()
                 }
             }
 
+
+            for(int net = 0; net < fixedGroups.size(); ++net)
+            {
+                InsulationTableNet tableNet;
+
+                tableNet.loomNo = loomNumber;
+                tableNet.netNo = net;
+                tableNet.endpoints = fixedGroups[net];
+
+                tableNets.append(tableNet);
+            }
+
+            insulationNetsPerLoom.append(fixedGroups.size());
+
             // ---------------------------------------------------
             // STEP-4 : Print Packet Structure
             // ---------------------------------------------------
@@ -3571,6 +4432,8 @@ void MainWindow::on_pushButton_run_clicked()
             //Loom packets storage end -----------------------------------
         }
 
+        test->setInsulationLoomNetCounts(insulationNetsPerLoom);
+
         //UART Packet Creation of 1024 starts ------------------------
 
         writeToNotes("");
@@ -3648,6 +4511,57 @@ void MainWindow::on_pushButton_run_clicked()
 
         //UART Packet Creation of 1024 ends --------------------------
 
+
+        //Reset Progress
+        currentPercentage = 0.0;
+        ui->progressBar_InsuIsoTest->setValue(0);
+        currentLoomNetProgress = 0.0;
+
+        //Sending Packet Creation To testcontroller
+        quint16 numberOfPackets =
+                static_cast<quint16>(uartPackets.size());
+
+        quint16 numberOfLooms =
+                static_cast<quint16>(loomPackets.size());
+
+        totalInsulationLooms = numberOfLooms;
+
+        float insulationVoltage =
+                static_cast<float>(
+                    ui->doubleSpinBox_insuIsoVoltage->value());
+
+        float resistanceThreshold =
+                static_cast<float>(
+                    ui->doubleSpinBox_ResistanceThreshold->value());
+
+        quint8 testBetweenConnectors =
+                ui->checkBox_TestBwConnectors->isChecked()
+                ? 0x01
+                : 0x00;
+
+        quint8 testType =
+            (ui->comboBox_test->currentText() == "Isolation")
+            ? 0x4F
+            : 0x3F;
+
+        test->sendInsulationStartPacket(
+            numberOfPackets,
+            numberOfLooms,
+            insulationVoltage,
+            resistanceThreshold,
+            testBetweenConnectors,
+            testType,
+            uartPackets);
+
+        //Page Movement
+        // Move to two wire test page
+        ui->stackedWidget->setCurrentWidget(
+            ui->page_InsuIsoTEst);
+
+        ui->label_test_InsuIso->setText(
+            ui->comboBox_test->currentText()+" Test");
+
+        populateInsulationTable(tableNets, patch);
 
     }
 
@@ -3827,6 +4741,12 @@ void MainWindow::on_pushButton_delHarnessRow_clicked()
 
 void MainWindow::on_pushButton_backFromTwoWireTest_clicked()
 {
+    if(test->isTwoWireTestRunning())
+    {
+        QMessageBox::warning(this,"Two Wire Test","Please wait two wire test is running");
+        return;
+    }
+
     ui->stackedWidget->setCurrentWidget(ui->page_test);
 }
 
@@ -3838,6 +4758,15 @@ void MainWindow::on_pushButton_selfTest_clicked()
 
 void MainWindow::on_pushButton_selfBack_clicked()
 {
+    if(test->isSelfTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Self Test Running",
+            "Please wait until the self test is completed.");
+        return;
+    }
+
     for (int i = 1; i <= 15; ++i)
     {
         QTextEdit *textEdit =
@@ -3866,6 +4795,15 @@ void MainWindow::on_pushButton_selfRun_clicked()
                     this,
                     "Self Test",
                     "Serial port is not connected.");
+        return;
+    }
+
+    if(test->isSelfTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Self Test Running",
+            "Self test is already running.");
         return;
     }
 
@@ -3904,12 +4842,34 @@ void MainWindow::on_pushButton_selfRun_clicked()
 
 void MainWindow::on_pushButton_selfAbort_clicked()
 {
-    test->abortCommand();
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Self Test",
+                "Are you sure you want to abort the Self test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
 }
 
 void MainWindow::on_pushButton_stopTwoWireTest_clicked()
 {
-    test->abortCommand();
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Two Wire Test",
+                "Are you sure you want to abort the Two Wire test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
 }
 
 void MainWindow::on_pushButton_calibrationTest_clicked()
@@ -4062,6 +5022,15 @@ void MainWindow::on_pushButton_calibrationTest_clicked()
 
 void MainWindow::on_pushButton_calibrationRun_clicked()
 {
+    if (test->isCalibrationRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Calibration Test Running",
+               "Calibration test is already running.");
+           return;
+       }
+
     // Clear Calibration Value column
     for (int row = 0;
          row < m_calibrationModel->rowCount();
@@ -4079,16 +5048,46 @@ void MainWindow::on_pushButton_calibrationRun_clicked()
 
 void MainWindow::on_pushButton_calibrationBack_clicked()
 {
+    if (test->isCalibrationRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Calibration Test Running",
+               "Please wait until the calibration test is completed.");
+           return;
+       }
+
+    ui->lineEdit_calibratedValue->clear();
     ui->stackedWidget->setCurrentWidget(ui->page_testPage);
 }
 
 void MainWindow::on_pushButton_calibrationAbort_clicked()
 {
-    test->abortCommand();
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Calibration",
+                "Are you sure you want to abort the calibration test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
 }
 
 void MainWindow::on_pushButton_calibrationSave_clicked()
 {
+    if (test->isCalibrationRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Calibration Test Running",
+               "Please wait until the calibration test is completed.");
+           return;
+       }
+
     // ---------------------------------------------------------
     // Check database
     // ---------------------------------------------------------
@@ -4222,13 +5221,67 @@ void MainWindow::on_pushButton_calibrationSave_clicked()
                 ->item(row, 2)
                 ->text();
 
+        // ---------------------------------------------------------
+        // User representation -> Hardware representation
+        // ---------------------------------------------------------
+
+        int logicalConnector = connectorText.toInt();
+        int logicalPin = pinText.toInt();
+
+        int dbConnector;
+        int dbPin;
+
+        if (logicalPin <= 64)
+        {
+            // First half
+            //
+            // TP1  -> TP1
+            // TP2  -> TP3
+            // ...
+            // TP15 -> TP29
+
+            dbConnector =
+                    (logicalConnector * 2) - 1;
+
+            dbPin = logicalPin;
+        }
+        else
+        {
+            // Second half
+            //
+            // TP1  -> TP2
+            // TP2  -> TP4
+            // ...
+            // TP14 -> TP28
+            //
+            // Special:
+            // TP15 second half -> TP31
+            // because SLOT 30 is missing.
+
+            if (logicalConnector == 15)
+            {
+                dbConnector = 31;
+            }
+            else
+            {
+                dbConnector =
+                        logicalConnector * 2;
+            }
+
+            dbPin = logicalPin - 64;
+        }
+
+        // ---------------------------------------------------------
+        // Insert hardware representation into DB
+        // ---------------------------------------------------------
+
         insertQuery.bindValue(
             ":connector",
-            connectorText.toInt());
+            dbConnector);
 
         insertQuery.bindValue(
             ":pin",
-            pinText.toInt());
+            dbPin);
 
         // Can contain either:
         // numeric value OR "SLOT MISS"
@@ -4242,13 +5295,17 @@ void MainWindow::on_pushButton_calibrationSave_clicked()
                     QString(
                         "Failed to save calibration data.\n"
                         "Row: %1\n"
-                        "Connector: %2\n"
-                        "Pin: %3\n"
-                        "Value: %4\n\n"
-                        "Database Error:\n%5")
+                        "User Connector: %2\n"
+                        "User Pin: %3\n"
+                        "DB Connector: %4\n"
+                        "DB Pin: %5\n"
+                        "Value: %6\n\n"
+                        "Database Error:\n%7")
                     .arg(row + 1)
-                    .arg(connectorText)
-                    .arg(pinText)
+                    .arg(logicalConnector)
+                    .arg(logicalPin)
+                    .arg(dbConnector)
+                    .arg(dbPin)
                     .arg(valueText)
                     .arg(insertQuery.lastError().text());
 
@@ -4302,6 +5359,18 @@ void MainWindow::on_pushButton_calibrationSave_clicked()
             "Total rows: %1")
         .arg(m_calibrationModel->rowCount()));
 
+    // Save successful
+    ui->tableView_Calibration->setClipboardEnabled(false);
+
+    ui->tableView_Calibration->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+
+    ui->tableView_Calibration->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+
+    ui->tableView_Calibration->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+
     QMessageBox::information(
         this,
         "Calibration Save",
@@ -4313,6 +5382,15 @@ void MainWindow::on_pushButton_calibrationSave_clicked()
 
 void MainWindow::on_pushButton_calibrationView_clicked()
 {
+    if (test->isCalibrationRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Calibration Test Running",
+               "Please wait until the calibration test is completed.");
+           return;
+       }
+
     // ---------------------------------------------------------
     // Check database
     // ---------------------------------------------------------
@@ -4430,29 +5508,78 @@ void MainWindow::on_pushButton_calibrationView_clicked()
 
     while (query.next())
     {
-        QString connector =
-                query.value("connector").toString();
+        int dbConnector =
+                query.value("connector").toInt();
 
-        QString pin =
-                query.value("pin").toString();
+        int dbPin =
+                query.value("pin").toInt();
 
         QString calibrationValue =
                 query.value("calibrationValue").toString();
 
+        // ---------------------------------------------------------
+        // Hardware representation -> User representation
+        // ---------------------------------------------------------
+
+        int userConnector;
+        int userPin;
+
+        if (dbConnector == 31)
+        {
+            // SLOT 31 is the second half of TP15
+            userConnector = 15;
+            userPin = dbPin + 64;
+        }
+        else if (dbConnector % 2 == 1)
+        {
+            // First half
+            //
+            // TP1  -> User TP1
+            // TP3  -> User TP2
+            // ...
+            // TP29 -> User TP15
+
+            userConnector =
+                    (dbConnector + 1) / 2;
+
+            userPin = dbPin;
+        }
+        else
+        {
+            // Second half
+            //
+            // TP2  -> User TP1
+            // TP4  -> User TP2
+            // ...
+            // TP28 -> User TP14
+
+            userConnector =
+                    dbConnector / 2;
+
+            userPin = dbPin + 64;
+        }
+
+        // ---------------------------------------------------------
+        // Fill user-visible model
+        // ---------------------------------------------------------
+
         m_calibrationModel->setItem(
             row,
             0,
-            new QStandardItem(connector));
+            new QStandardItem(
+                QString::number(userConnector)));
 
         m_calibrationModel->setItem(
             row,
             1,
-            new QStandardItem(pin));
+            new QStandardItem(
+                QString::number(userPin)));
 
         m_calibrationModel->setItem(
             row,
             2,
-            new QStandardItem(calibrationValue));
+            new QStandardItem(
+                calibrationValue));
 
         ++row;
     }
@@ -4538,7 +5665,8 @@ void MainWindow::on_pushButton_calibrationView_clicked()
         QString(
             "Calibration data loaded successfully.\n\n"
             "Total rows loaded: %1")
-        .arg(row));}
+        .arg(row));
+}
 
 void MainWindow::on_pushButton_setColumnCalibrate_clicked()
 {
@@ -4678,7 +5806,96 @@ void MainWindow::on_pushButton_setColumnCalibrate_clicked()
         .arg(valueText)
         .arg(m_calibrationModel->rowCount()));
 
-    //continue from here ...
+}
+
+void MainWindow::on_pushButton_editCalibration_clicked()
+{
+    if (test->isCalibrationRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Calibration Test Running",
+            "Please wait until the calibration test is completed.");
+
+        return;
+    }
+
+    ui->tableView_Calibration->setClipboardEnabled(true);
+
+    ui->tableView_Calibration->setEditTriggers(
+        QAbstractItemView::DoubleClicked);
+
+    ui->tableView_Calibration->setSelectionBehavior(
+        QAbstractItemView::SelectItems);
+
+    ui->tableView_Calibration->setSelectionMode(
+        QAbstractItemView::ExtendedSelection);
+
+    QMessageBox::information(
+        this,
+        "Calibration Value",
+        "Double click to edit.\n\n"
+        "You can select multiple calibration values "
+        "and use Ctrl+C / Ctrl+V.");
+}
+
+void MainWindow::on_pushButton_saveTwoWirePdf_clicked()
+{
+
+}
+
+void MainWindow::on_pushButton_backFromInsuIso_clicked()
+{
+    if (test->isInsuIsoTestRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Test Running",
+               "Please wait until the test is completed.");
+           return;
+       }
+
+     ui->stackedWidget->setCurrentWidget(ui->page_test);
+}
+
+void MainWindow::on_pushButton_stopInsuIso_clicked()
+{
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Test",
+                "Are you sure you want to abort the test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
+}
+
+void MainWindow::on_pushButton_saveInsuIso_clicked()
+{
+    if (test->isInsuIsoTestRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Test Running",
+               "Please wait until the test is completed.");
+           return;
+       }
+}
+
+void MainWindow::on_pushButton_openInsuIsoFiles_clicked()
+{
+    if (test->isInsuIsoTestRunning())
+       {
+           QMessageBox::warning(
+               this,
+               "Test Running",
+               "Please wait until the test is completed.");
+           return;
+       }
 }
 
 void MainWindow::on_pushButton_saveTwoWirePdf_clicked()

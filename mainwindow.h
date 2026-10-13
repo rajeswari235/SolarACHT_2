@@ -88,7 +88,6 @@ public:
 
      QByteArray constructTwoWireStartPacket(quint16 totalPackets);
 
-     // Insulation Logic
      struct HarnessConnection
      {
          QString cable;
@@ -101,6 +100,24 @@ public:
 
      void populateTwoWireTestTable(const QVariantList &harness);
 
+     //Insu/Iso test Table Things
+     struct InsulationTableNet
+     {
+         int loomNo;
+         int netNo;
+
+         QVector<QPair<QString, int>> endpoints;
+     };
+
+     void populateInsulationTable(
+         const QVector<InsulationTableNet> &nets,
+         const QVariantList &patchData);
+
+
+     QString getActualConnectorName(
+         const QVariantList &patchData,
+         const QString &hardwareCon,
+         int hardwarePin);
 
 private slots:
      void on_pushButton_Save_clicked();
@@ -242,6 +259,7 @@ private slots:
 
       void on_pushButton_setColumnCalibrate_clicked();
 
+<<<<<<< HEAD
       void on_pushButton_saveTwoWirePdf_clicked();
 
       void generateTwoWireTestPDF();
@@ -271,6 +289,19 @@ private slots:
                                  qreal &y,
                                  int &pageNumber);
 
+=======
+      void on_pushButton_editCalibration_clicked();
+
+      void on_pushButton_saveTwoWirePdf_clicked();
+
+      void on_pushButton_backFromInsuIso_clicked();
+
+      void on_pushButton_stopInsuIso_clicked();
+
+      void on_pushButton_saveInsuIso_clicked();
+
+      void on_pushButton_openInsuIsoFiles_clicked();
+>>>>>>> main
 
 public slots:
 
@@ -308,6 +339,19 @@ public slots:
       float calibrationBytesToFloat(
           const QByteArray &data,
           int offset);
+
+      //Insulation/Isolation test slots
+      void onInsulationLoomPassed(
+          int loomNo);
+
+      void onInsulationLoomFailed(
+          int loomNo,
+          const QByteArray &loomData);
+
+       void onInsulationResultsCompleted();
+
+       void onInsulationNetMarkerReceived(int loomNo, int totalNets);
+
 
 private:
     Ui::MainWindow *ui;
@@ -353,6 +397,11 @@ private:
 
 
 
+    //Insu/Iso Test Progress bar
+    double currentPercentage = 0.0;
+    int totalInsulationLooms = 0;
+
+    double currentLoomNetProgress = 0.0;
 };
 
 #endif // MAINWINDOW_H

@@ -584,6 +584,122 @@ void TestController::handleCalibrationReception()
     sendNextCalibrationSlot();
 }
 
+void TestController::sendInsulationStartPacket(
+    quint16 numberOfPackets,
+    quint16 numberOfLooms,
+    float insulationVoltage,
+    float resistanceThreshold,
+    quint8 testBetweenConnectors,
+    quint8 testType,
+    const QVector<QByteArray> &packets)
+{
+    QByteArray packet;
+
+    packet.append(char(0x53));
+    packet.append(char(0x4B));
+    packet.append(char(0x34));
+
+    // Number Of Packets
+    packet.append(
+        char((numberOfPackets >> 8) & 0xFF));
+
+    packet.append(
+        char(numberOfPackets & 0xFF));
+
+    // Number Of Looms
+    packet.append(
+        char((numberOfLooms >> 8) & 0xFF));
+
+    packet.append(
+        char(numberOfLooms & 0xFF));
+
+    // Insulation Voltage - reverse float byte order
+    quint32 voltageBits;
+
+    memcpy(
+        &voltageBits,
+        &insulationVoltage,
+        sizeof(float));
+
+    packet.append(
+        char((voltageBits >> 24) & 0xFF));
+
+    packet.append(
+        char((voltageBits >> 16) & 0xFF));
+
+    packet.append(
+        char((voltageBits >> 8) & 0xFF));
+
+    packet.append(
+        char(voltageBits & 0xFF));
+
+    // Resistance Threshold - reverse float byte order
+    quint32 resistanceBits;
+
+    memcpy(
+        &resistanceBits,
+        &resistanceThreshold,
+        sizeof(float));
+
+    packet.append(
+        char((resistanceBits >> 24) & 0xFF));
+
+    packet.append(
+        char((resistanceBits >> 16) & 0xFF));
+
+    packet.append(
+        char((resistanceBits >> 8) & 0xFF));
+
+    packet.append(
+        char(resistanceBits & 0xFF));
+
+    // Test Between Connectors
+    packet.append(
+        char(testBetweenConnectors));
+
+    // Test Type : 3F (Insulation), 4F (Isolation)
+    packet.append(char(testType));
+
+    // XOR
+    quint8 checksum = 0;
+
+    for (char byte : packet)
+    {
+        checksum ^=
+            static_cast<quint8>(byte);
+    }
+
+    packet.append(char(checksum));
+
+    // Store Insulation packets
+    m_insulationPackets = packets;
+
+    m_currentInsulationPacket = 0;
+
+    // Set Insulation state
+    m_waitingForInsulationStartAck = true;
+    m_waitingForInsulationPacketAck = false;
+    m_receivingInsulationResults = false;
+
+    m_insulationResults.clear();
+
+    m_currentInsulationLoom = 0;
+    m_currentInsulationLoomData.clear();
+
+    m_insulationNetMarkersSeen = 0;
+
+    // TX START packet
+    serial->write(packet);
+
+    qDebug() << "Insulation Start TX:"
+             << packet.toHex(' ').toUpper();
+
+    emit executeWriteToNotes(
+        QString("Insulation Start TX: %1")
+            .arg(QString::fromLatin1(
+                packet.toHex(' ').toUpper())));
+}
+
 void TestController::abortCommand()
 {
     serial->write(QByteArray::fromHex("41 42 4F 52 54"));;
@@ -607,6 +723,22 @@ void TestController::abortCommand()
     // Reset packet state
     m_currentPacket = 0;
     m_packets.clear();
+
+    // Stop Insulation / Isolation
+    m_waitingForInsulationStartAck = false;
+    m_waitingForInsulationPacketAck = false;
+    m_receivingInsulationResults = false;
+
+    // Stop/Reset Insulation / Isolation packet state
+    m_currentInsulationPacket = 0;
+    m_insulationPackets.clear();
+
+    // Clear results
+    m_insulationResults.clear();
+
+    // Reset loom state
+    m_currentInsulationLoom = 0;
+    m_currentInsulationLoomData.clear();
 
     // Clear received data
     buffer.clear();
@@ -992,6 +1124,177 @@ void TestController::onReadyRead()
     }
 
     // =====================================================
+    // INSULATION/ISOLATION RESULT RECEPTION
+    // =====================================================
+
+    if (m_receivingInsulationResults)
+    {
+        // Count 2F 2F markers in the current loom data
+        const QByteArray netMarker = QByteArray::fromHex("2F2F");
+        const QByteArray loomEndMarker = QByteArray::fromHex("FF00");
+
+        int loomEndIndex = buffer.indexOf(loomEndMarker);
+
+        QByteArray currentLoomData =
+            (loomEndIndex >= 0)
+                ? buffer.left(loomEndIndex)
+                : buffer;
+
+        int markerCount = 0;
+        int pos = 0;
+
+        while ((pos = currentLoomData.indexOf(netMarker, pos)) >= 0)
+        {
+            markerCount++;
+            pos += netMarker.size();  // Skip both bytes of this marker
+        }
+
+        qDebug() << "Loom data bytes:" << currentLoomData.size()
+                 << "Marker pairs:" << markerCount
+                 << "Expected nets:"
+                 << m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0);
+
+        while (m_insulationNetMarkersSeen < markerCount &&
+               m_insulationNetMarkersSeen <
+                   m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0))
+        {
+            m_insulationNetMarkersSeen++;
+
+            int totalNets =
+                m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0);
+
+            qDebug() << "Loom:" << m_currentInsulationLoom + 1
+                     << "Net marker:" << m_insulationNetMarkersSeen
+                     << "Total nets:" << totalNets;
+
+            emit insulationNetMarkerReceived(
+                m_currentInsulationLoom + 1,
+                totalNets);
+        }
+
+        // --------------------------------------------------------
+        // FINAL TEST TERMINATOR
+        // --------------------------------------------------------
+
+        const QByteArray endMarker = "ABCDE";
+
+        int testEndIndex =
+                buffer.indexOf(endMarker);
+
+        if(testEndIndex >= 0)
+        {
+            buffer.remove(
+                        0,
+                        testEndIndex + endMarker.size());
+
+            m_receivingInsulationResults = false;
+
+            qDebug()
+                    << "ABCDE received - "
+                       " test completed";
+
+            emit executeWriteToNotes(
+                        " Test Completed");
+
+            emit insulationResultsCompleted();
+
+            return;
+        }
+
+        // --------------------------------------------------------
+        // ONE LOOM TERMINATOR
+        // --------------------------------------------------------
+
+        if (loomEndIndex < 0)
+        {
+            // Complete loom has not arrived yet.
+            return;
+        }
+
+        // --------------------------------------------------------
+        // One complete loom received
+        // --------------------------------------------------------
+
+        QByteArray loomData =
+                buffer.left(loomEndIndex);
+
+        // Remove loom data + FF 00
+        buffer.remove(
+            0,
+            loomEndIndex + loomEndMarker.size());
+
+        m_currentInsulationLoomData = loomData;
+
+        QByteArray failedMarker =
+                QByteArray::fromHex("2E2E");
+
+        bool loomFailed =
+                loomData.contains(failedMarker);
+
+        if(!loomFailed)
+        {
+            qDebug()
+                << "Insulation Loom"
+                << m_currentInsulationLoom + 1
+                << "PASS";
+
+            emit executeWriteToNotes(
+                QString("Insulation Loom %1 : PASS")
+                .arg(m_currentInsulationLoom + 1));
+
+            emit insulationLoomPassed(
+                m_currentInsulationLoom + 1);
+        }
+        else
+        {
+            qDebug()
+                << "Insulation Loom"
+                << m_currentInsulationLoom + 1
+                << "FAIL";
+
+            emit executeWriteToNotes(
+                QString("Insulation Loom %1 : FAIL")
+                .arg(m_currentInsulationLoom + 1));
+
+            emit insulationLoomFailed(
+                m_currentInsulationLoom + 1,
+                loomData);
+        }
+
+        qDebug()
+                << "INSULATION LOOM:"
+                << m_currentInsulationLoom + 1;
+
+        qDebug()
+                << "LOOM DATA:"
+                << loomData.toHex(' ').toUpper();
+
+        qDebug()
+                << "LOOM DATA SIZE:"
+                << loomData.size()
+                << "Bytes";
+
+        emit executeWriteToNotes(
+            QString("Insulation Loom %1 Result: %2")
+            .arg(m_currentInsulationLoom + 1)
+            .arg(QString::fromLatin1(
+                loomData.toHex(' ').toUpper())));
+
+        emit executeWriteToNotes(
+            QString("Insulation Loom %1 Result Size: %2 Bytes")
+            .arg(m_currentInsulationLoom + 1)
+            .arg(loomData.size()));
+
+        // Move to next loom
+        m_currentInsulationLoom++;
+        m_insulationNetMarkersSeen = 0;
+
+        return;
+    }
+
+
+
+    // =====================================================
     // ACK PROCESSING
     // =====================================================
 
@@ -1005,7 +1308,7 @@ void TestController::onReadyRead()
                         "ACK Received");
 
             // =================================================
-            // ACK for START Packet
+            // ACK for TWO WIRE START Packet
             // =================================================
 
             if (m_waitingForStartAck)
@@ -1034,8 +1337,39 @@ void TestController::onReadyRead()
             }
 
             // =================================================
-            // ACK for DATA Packet
+            // INSULATION/ISOLATION ACK FOR START PACKET
             // =================================================
+
+            if (m_waitingForInsulationStartAck)
+            {
+                m_waitingForInsulationStartAck = false;
+
+                m_currentInsulationPacket = 0;
+
+                if (!m_insulationPackets.isEmpty())
+                {
+                    serial->write(
+                        m_insulationPackets[0]);
+
+                    emit executeWriteToNotes(
+                        QString("Insulation TX Packet %1")
+                            .arg(1));
+
+                    emit executeWriteToNotes(
+                        m_insulationPackets[0]
+                            .toHex(' ')
+                            .toUpper());
+
+                    m_waitingForInsulationPacketAck = true;
+                }
+
+                continue;
+            }
+
+            // =================================================
+            // ACK for TWO WIRE DATA Packet
+            // =================================================
+
 
             if (m_waitingForPacketAck)
             {
@@ -1076,6 +1410,57 @@ void TestController::onReadyRead()
 
                     emit executeWriteToNotes(
                                 "Waiting for Two Wire float results...");
+                }
+
+                continue;
+            }
+
+            // =================================================
+            // ACK for INSULATION/ISOLATION DATA Packet
+            // =================================================
+
+            if (m_waitingForInsulationPacketAck)
+            {
+                m_currentInsulationPacket++;
+
+                if (m_currentInsulationPacket <
+                    m_insulationPackets.size())
+                {
+                    serial->write(
+                        m_insulationPackets[
+                            m_currentInsulationPacket]);
+
+                    emit executeWriteToNotes(
+                        QString("Insulation TX Packet %1")
+                            .arg(m_currentInsulationPacket + 1));
+
+                    emit executeWriteToNotes(
+                        m_insulationPackets[
+                            m_currentInsulationPacket]
+                            .toHex(' ')
+                            .toUpper());
+                }
+                else
+                {
+                    m_waitingForInsulationPacketAck = false;
+
+                    emit executeWriteToNotes(
+                        "Insulation Transmission Completed");
+
+                    qDebug()
+                        << "Insulation Transmission Complete";
+
+                    // =============================================
+                    // NOW EXPECT INSULATION RESULTS FROM CHT
+                    // =============================================
+
+                    m_receivingInsulationResults = true;
+
+                    qDebug()
+                        << "Waiting for Insulation results...";
+
+                    emit executeWriteToNotes(
+                        "Waiting for Insulation results...");
                 }
 
                 continue;
