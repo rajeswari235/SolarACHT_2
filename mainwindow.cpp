@@ -6591,10 +6591,10 @@ qreal MainWindow::drawTwoWireTestHeader(
     QFont boldFont("Times New Roman", 10);
     boldFont.setBold(true);
 
-    QFont titleFont("Times New Roman", 12);
+    QFont titleFont("Times New Roman", 14);
     titleFont.setBold(true);
 
-    QFont companyFont("Times New Roman", 14);
+    QFont companyFont("Times New Roman", 16);
     companyFont.setBold(true);
 
     if (!solarLogo.isNull())
@@ -6610,7 +6610,7 @@ qreal MainWindow::drawTwoWireTestHeader(
     painter.setFont(companyFont);
 
     painter.drawText(
-        QRectF(logoWidth, 8, pageWidth - 2 * logoWidth, 25),
+        QRectF(logoWidth,20, pageWidth - 2 * logoWidth, 25),
         Qt::AlignCenter | Qt::TextWordWrap,
         "SOLAR DEFENCE AND AEROSPACE LIMITED");
 
@@ -7002,6 +7002,7 @@ void MainWindow::drawTwoWireTestTable(
     }
     y+=20;
 }
+
 void MainWindow::drawTwoWireTestFooter(
         QPainter &painter,
         QPrinter &printer,
@@ -7019,22 +7020,29 @@ void MainWindow::drawTwoWireTestFooter(
     QFont boldFont("Times New Roman", 10);
     boldFont.setBold(true);
 
-    QFontMetricsF metrics(normalFont);
+    qreal left = 20;
+    qreal right = 20;
+    qreal notesWidth = pageWidth - left - right;
 
-    QRectF notesRect = metrics.boundingRect(
-        QRectF(0, 0, pageWidth, 10000),
-        Qt::TextWordWrap,
-        notes);
+    // Prepare notes with automatic wrapping
+    QTextDocument notesDocument;
+    notesDocument.setDefaultFont(normalFont);
+    notesDocument.setPlainText("Notes: " + notes);
+
+    QTextOption textOption;
+    textOption.setWrapMode(
+        QTextOption::WrapAtWordBoundaryOrAnywhere);
+    notesDocument.setDefaultTextOption(textOption);
+    notesDocument.setTextWidth(notesWidth);
 
     qreal notesHeight = qMax<qreal>(
-        25.0, notesRect.height() + 10.0);
+        25.0, notesDocument.size().height() + 10.0);
 
     qreal signatureHeight = 60.0;
     qreal requiredHeight = notesHeight + signatureHeight + 30.0;
 
     if (y + requiredHeight > bottom)
     {
-        // Add page number to the current page before leaving it
         painter.setFont(boldFont);
         painter.setPen(Qt::black);
 
@@ -7049,17 +7057,22 @@ void MainWindow::drawTwoWireTestFooter(
         y = 40;
     }
 
-    painter.setFont(normalFont);
-    painter.setPen(Qt::black);
+    // Draw complete notes text
+    painter.save();
+    painter.translate(left, y);
 
-    painter.drawText(
-        QRectF(0, y, pageWidth, notesHeight),
-        Qt::AlignLeft | Qt::TextWordWrap,
-        "Notes: " + notes);
+    notesDocument.drawContents(
+        &painter,
+        QRectF(0, 0, notesWidth,
+               notesDocument.size().height()));
+
+    painter.restore();
 
     y += notesHeight + 80;
 
+    // Signature headings
     painter.setFont(boldFont);
+    painter.setPen(Qt::black);
 
     painter.drawText(
         QRectF(0, y, pageWidth / 3, 20),
@@ -7077,17 +7090,11 @@ void MainWindow::drawTwoWireTestFooter(
         "Inspected By:");
 
     // Page number on the final page
-    painter.setFont(boldFont);
-    painter.setPen(Qt::black);
-
     painter.drawText(
         QRectF(0, pageHeight - 25, pageWidth, 15),
         Qt::AlignCenter,
         "Page " + QString::number(pageNumber));
 }
-
-
-
 void MainWindow::on_pushButton_selfTestSave_clicked()
 {
     QString folderPath =
@@ -7129,22 +7136,15 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
     const qreal pageWidth = pageRect.width();
     const qreal pageHeight = pageRect.height();
 
-    const qreal left = 40;
-    const qreal right = 40;
-    const qreal top = 40;
-    const qreal bottomMargin = 45;
+    const qreal left = 50;
+    const qreal right = 50;
+    const qreal top = 50;
+    const qreal bottomMargin = 55;
 
-    QFont titleFont("Times New Roman", 16, QFont::Bold);
+    QFont titleFont("Times New Roman", 14, QFont::Bold);
     QFont normalFont("Times New Roman", 11);
-    QFont companyFont("Times New Roman", 14, QFont::Bold);
+    QFont companyFont("Times New Roman", 16, QFont::Bold);
     QFont pageFont("Times New Roman", 9);
-
-
-    QStringList labels = {
-        "Test 1", "Test 2", "Test 3", "Test 4", "Test 5",
-        "Test 6", "Test 7", "Test 8", "Test 9", "Test 10",
-        "Test 11", "Test 12", "Test 13", "Test 14", "Test 15"
-    };
 
     QStringList values = {
         ui->textEdit_1->toPlainText(),
@@ -7170,46 +7170,51 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
     QImage solarLogo(":/new/prefix1/images/solar1.png");
     QImage drdoLogo(":/new/prefix1/images/drdo.png");
 
-    const qreal logoWidth = 95;
-    const qreal logoHeight = 55;
+    const qreal logoWidth = 105;
+    const qreal logoHeight = 75;
 
     if (!solarLogo.isNull())
+    {
         painter.drawImage(
-                    QRectF(0, 0, logoWidth, logoHeight), solarLogo);
+                    QRectF(10, 0, logoWidth, logoHeight),
+                    solarLogo);
+    }
 
     if (!drdoLogo.isNull())
+    {
         painter.drawImage(
-                    QRectF(pageWidth - logoWidth, 0,
-                           logoWidth, logoHeight), drdoLogo);
+                    QRectF(pageWidth - logoWidth - 10, 0,
+                           logoWidth, logoHeight),
+                    drdoLogo);
+    }
 
     painter.setFont(companyFont);
     painter.drawText(
-                QRectF(logoWidth, 8,
+                QRectF(logoWidth, 30,
                        pageWidth - 2 * logoWidth, 25),
                 Qt::AlignCenter,
                 "SOLAR DEFENCE AND AEROSPACE LIMITED");
 
     painter.setFont(titleFont);
     painter.drawText(
-                QRectF(0, 40, pageWidth, 30),
+                QRectF(0, 65, pageWidth, 30),
                 Qt::AlignCenter,
                 "GNC KIT CABLE HARNESS TEST REPORT");
 
     painter.drawText(
-                QRectF(left, 80, pageWidth - left - right, 30),
+                QRectF(left, 100,
+                       pageWidth - left - right, 30),
                 Qt::AlignCenter,
                 "SELF TEST REPORT");
 
-    qreal y = 125;
-
-    painter.setFont(normalFont);
-    QFontMetricsF metrics(normalFont);
+    qreal y = 160;
 
     int pageNumber = 1;
 
-    // Draw the page number at the bottom of the current page.
+    // Draw page number
     auto drawPageNumber = [&]()
     {
+        painter.save();
         painter.setFont(pageFont);
         painter.setPen(Qt::black);
 
@@ -7218,63 +7223,107 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
                            pageWidth, 20),
                     Qt::AlignCenter,
                     "Page " + QString::number(pageNumber));
+
+        painter.restore();
     };
 
-    // Print test values
-    for (int i = 0; i < values.size(); ++i)
+    // Draw four-sided page border
+    auto drawPageBorder = [&](bool firstPage)
     {
-        QString value = values[i].trimmed();
+        painter.save();
+        painter.setPen(QPen(Qt::black, 1));
 
-        if (value.isEmpty())
-            value = "N/A";
+        qreal borderLeft = 30;
+        qreal borderRight = pageWidth - 30;
+        qreal borderTop = firstPage ? 160- 10 : 30;
+        qreal borderBottom = pageHeight - 40;
 
-        QString text = labels[i] + " : " + value;
+        painter.drawRect(
+                    QRectF(borderLeft, borderTop,
+                           borderRight - borderLeft,
+                           borderBottom - borderTop));
 
-        QRectF measuredRect = metrics.boundingRect(
-                    QRectF(0, 0,
-                           pageWidth - left - right, 10000),
-                    Qt::AlignLeft | Qt::TextWordWrap,
-                    text);
+        painter.restore();
+    };
 
-        qreal rowHeight = qMax<qreal>(
-                    30, measuredRect.height() + 12);
+    // Two-column layout
+    const qreal columnGap = 25;
 
-        // If the entry will not fit, finish this page first.
-        if (y + rowHeight > pageHeight - bottomMargin)
+    const qreal columnWidth =
+            (pageWidth - left - right - columnGap) / 2;
+
+    // 0 = left column, 1 = right column
+    int column = 0;
+
+    // Start below the header on the first page
+    qreal columnY[2] = {y, y};
+
+    // Available bottom position for text
+    const qreal contentBottom = pageHeight - bottomMargin;
+
+
+    for (const QString &text : values)
+    {
+
+        QString displayText = text.trimmed();
+
+        QTextDocument document;
+        document.setDefaultFont(normalFont);
+        document.setPlainText(displayText);
+        document.setTextWidth(columnWidth);
+
+        QTextOption textOption;
+        textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        document.setDefaultTextOption(textOption);
+        qreal textHeight = document.size().height();
+        qreal rowHeight = qMax(30.0, textHeight + 12);
+
+        // Move to the next column/page if required
+        if (columnY[column] + rowHeight > contentBottom)
         {
-            drawPageNumber();
-
-            if (!printer.newPage())
+            if (column == 0)
             {
-                painter.end();
-
-                QMessageBox::warning(
-                            this, "PDF",
-                            "Unable to create a new PDF page.");
-                return;
+                column = 1;
             }
+            else
+            {
+                drawPageBorder(pageNumber==1);
+                drawPageNumber();
 
-            ++pageNumber;
-            y = top;
+                printer.newPage();
+                pageNumber++;
 
-            // Header is intentionally NOT repeated.
+                column = 0;
+                columnY[0] = top;
+                columnY[1] = top;
+            }
         }
 
-        painter.setFont(normalFont);
-        painter.setPen(Qt::black);
+        qreal x = (column == 0)
+                  ? left
+                  : left + columnWidth + columnGap;
 
-        painter.drawText(
-                    QRectF(left, y,
-                           pageWidth - left - right,
-                           rowHeight),
-                    Qt::AlignLeft | Qt::AlignVCenter |
-                    Qt::TextWordWrap,
-                    text);
+        // Draw the complete text, preserving its line breaks
+        painter.save();
+        painter.translate(x, columnY[column]);
+        document.drawContents(
+            &painter,
+            QRectF(0, 0, columnWidth, textHeight)
+        );
+        painter.restore();
 
-        y += rowHeight + 30;
-    }
+        // Separator between separate QTextEdit entries
+        painter.setPen(QPen(Qt::lightGray, 0.5));
+        painter.drawLine(
+            QPointF(x, columnY[column] + rowHeight),
+            QPointF(x + columnWidth, columnY[column] + rowHeight)
+        );
 
-    // Print the last page number.
+        columnY[column] += rowHeight + 5;
+}
+
+    // Draw border and page number on the final page
+    drawPageBorder(pageNumber == 1);
     drawPageNumber();
 
     painter.end();

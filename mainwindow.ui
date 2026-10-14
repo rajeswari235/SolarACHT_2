@@ -5310,7 +5310,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -5479,7 +5479,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -5624,7 +5624,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -5636,7 +5636,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
