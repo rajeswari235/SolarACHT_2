@@ -259,7 +259,6 @@ private slots:
 
       void on_pushButton_setColumnCalibrate_clicked();
 
-<<<<<<< HEAD
       void on_pushButton_saveTwoWirePdf_clicked();
 
       void generateTwoWireTestPDF();
@@ -289,10 +288,10 @@ private slots:
                                  qreal &y,
                                  int &pageNumber);
 
-=======
+
       void on_pushButton_editCalibration_clicked();
 
-      void on_pushButton_saveTwoWirePdf_clicked();
+//      void on_pushButton_saveTwoWirePdf_clicked();
 
       void on_pushButton_backFromInsuIso_clicked();
 
@@ -301,7 +300,27 @@ private slots:
       void on_pushButton_saveInsuIso_clicked();
 
       void on_pushButton_openInsuIsoFiles_clicked();
->>>>>>> main
+
+      void drawInsoIsoTable( QPainter &painter,
+                             QPrinter &printer,
+                             qreal pageWidth,
+                             qreal pageHeight,
+                             qreal bottom,
+                             qreal &y,
+                             int &pageNumber);
+      void generateInsoIsoPDF();
+      void generateCalibratePDF();
+
+      void drawCalibrateTable(
+              QPainter &painter,
+              QPrinter &printer,
+              qreal pageWidth,
+              qreal pageHeight,
+              qreal bottom,
+              qreal &y,
+              int &pageNumber);
+
+      void on_pushButton_selfTestSave_clicked();
 
 public slots:
 
@@ -353,6 +372,8 @@ public slots:
        void onInsulationNetMarkerReceived(int loomNo, int totalNets);
 
 
+
+
 private:
     Ui::MainWindow *ui;
     QSqlDatabase db;
@@ -383,6 +404,7 @@ private:
     bool simulate;
 
     QStandardItemModel *m_twoWireTestModel = nullptr;
+    QStandardItemModel *model =nullptr;
 
     int expectedResults = 0;
 
@@ -393,6 +415,8 @@ private:
     //Calibration Test
     QStandardItemModel *m_calibrationModel = nullptr;
     int failedPinsCount = 0;
+    int failedPinsInso= 0;
+    int failedPinsCalibrate=0;
 
 
 
