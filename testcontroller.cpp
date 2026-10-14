@@ -684,7 +684,6 @@ void TestController::sendInsulationStartPacket(
     m_insulationResults.clear();
 
     m_currentInsulationLoom = 0;
-    m_currentInsulationLoomData.clear();
 
     m_insulationNetMarkersSeen = 0;
 
@@ -738,7 +737,6 @@ void TestController::abortCommand()
 
     // Reset loom state
     m_currentInsulationLoom = 0;
-    m_currentInsulationLoomData.clear();
 
     // Clear received data
     buffer.clear();
@@ -1123,174 +1121,166 @@ void TestController::onReadyRead()
         return;
     }
 
+
     // =====================================================
     // INSULATION/ISOLATION RESULT RECEPTION
     // =====================================================
 
     if (m_receivingInsulationResults)
     {
-        // Count 2F 2F markers in the current loom data
         const QByteArray netMarker = QByteArray::fromHex("2F2F");
         const QByteArray loomEndMarker = QByteArray::fromHex("FF00");
+        const QByteArray failedMarker = QByteArray::fromHex("2E2E");
+        const QByteArray endMarker = "ABCDE";
 
-        int loomEndIndex = buffer.indexOf(loomEndMarker);
-
-        QByteArray currentLoomData =
-            (loomEndIndex >= 0)
-                ? buffer.left(loomEndIndex)
-                : buffer;
-
-        int markerCount = 0;
-        int pos = 0;
-
-        while ((pos = currentLoomData.indexOf(netMarker, pos)) >= 0)
+        // Process every complete loom already in the buffer.
+        while (true)
         {
-            markerCount++;
-            pos += netMarker.size();  // Skip both bytes of this marker
-        }
+            int loomEndIndex = buffer.indexOf(loomEndMarker);
+            int testEndIndex = buffer.indexOf(endMarker);
 
-        qDebug() << "Loom data bytes:" << currentLoomData.size()
-                 << "Marker pairs:" << markerCount
-                 << "Expected nets:"
-                 << m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0);
+            // Count markers only in the current loom's data.
+            // Do not count bytes belonging to the final terminator.
+            int dataEndIndex = buffer.size();
 
-        while (m_insulationNetMarkersSeen < markerCount &&
-               m_insulationNetMarkersSeen <
-                   m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0))
-        {
-            m_insulationNetMarkersSeen++;
+            if (loomEndIndex >= 0)
+                dataEndIndex = loomEndIndex;
+
+            if (testEndIndex >= 0 &&
+                testEndIndex < dataEndIndex)
+            {
+                dataEndIndex = testEndIndex;
+            }
+
+            QByteArray currentLoomData = buffer.left(dataEndIndex);
+
+            int markerCount = 0;
+            int pos = 0;
+
+            while ((pos = currentLoomData.indexOf(netMarker, pos)) >= 0)
+            {
+                markerCount++;
+                pos += netMarker.size();
+            }
 
             int totalNets =
                 m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0);
 
-            qDebug() << "Loom:" << m_currentInsulationLoom + 1
-                     << "Net marker:" << m_insulationNetMarkersSeen
-                     << "Total nets:" << totalNets;
+            qDebug() << "Loom data bytes:" << currentLoomData.size()
+                     << "Marker pairs:" << markerCount
+                     << "Expected nets:" << totalNets;
 
-            emit insulationNetMarkerReceived(
-                m_currentInsulationLoom + 1,
-                totalNets);
-        }
+            while (m_insulationNetMarkersSeen < markerCount &&
+                   m_insulationNetMarkersSeen < totalNets)
+            {
+                m_insulationNetMarkersSeen++;
 
-        // --------------------------------------------------------
-        // FINAL TEST TERMINATOR
-        // --------------------------------------------------------
+                qDebug() << "Loom:" << m_currentInsulationLoom + 1
+                         << "Net marker:" << m_insulationNetMarkersSeen
+                         << "Total nets:" << totalNets;
 
-        const QByteArray endMarker = "ABCDE";
+                emit insulationNetMarkerReceived(
+                    m_currentInsulationLoom + 1,
+                    totalNets);
+            }
 
-        int testEndIndex =
-                buffer.indexOf(endMarker);
+            // --------------------------------------------------------
+            // Process a complete loom BEFORE completing the test.
+            // --------------------------------------------------------
 
-        if(testEndIndex >= 0)
-        {
-            buffer.remove(
-                        0,
-                        testEndIndex + endMarker.size());
+            if (loomEndIndex >= 0 &&
+                (testEndIndex < 0 || loomEndIndex < testEndIndex))
+            {
+                QByteArray loomData = buffer.left(loomEndIndex);
 
-            m_receivingInsulationResults = false;
+                // Remove loom data + FF 00.
+                buffer.remove(
+                    0,
+                    loomEndIndex + loomEndMarker.size());
 
-            qDebug()
-                    << "ABCDE received - "
-                       " test completed";
+                bool loomFailed = loomData.contains(failedMarker);
 
-            emit executeWriteToNotes(
-                        " Test Completed");
+                if (!loomFailed)
+                {
+                    qDebug() << "Insulation Loom"
+                             << m_currentInsulationLoom + 1
+                             << "PASS";
 
-            emit insulationResultsCompleted();
+                    emit executeWriteToNotes(
+                        QString("Insulation Loom %1 : PASS")
+                        .arg(m_currentInsulationLoom + 1));
 
+                    emit insulationLoomPassed(
+                        m_currentInsulationLoom + 1);
+                }
+                else
+                {
+                    qDebug() << "Insulation Loom"
+                             << m_currentInsulationLoom + 1
+                             << "FAIL";
+
+                    emit executeWriteToNotes(
+                        QString("Insulation Loom %1 : FAIL")
+                        .arg(m_currentInsulationLoom + 1));
+
+                    emit insulationLoomFailed(
+                        m_currentInsulationLoom + 1,
+                        loomData);
+                }
+
+                qDebug() << "INSULATION LOOM:"
+                         << m_currentInsulationLoom + 1;
+
+                qDebug() << "LOOM DATA:"
+                         << loomData.toHex(' ').toUpper();
+
+                qDebug() << "LOOM DATA SIZE:"
+                         << loomData.size() << "Bytes";
+
+                emit executeWriteToNotes(
+                    QString("Insulation Loom %1 Result: %2")
+                    .arg(m_currentInsulationLoom + 1)
+                    .arg(QString::fromLatin1(
+                        loomData.toHex(' ').toUpper())));
+
+                emit executeWriteToNotes(
+                    QString("Insulation Loom %1 Result Size: %2 Bytes")
+                    .arg(m_currentInsulationLoom + 1)
+                    .arg(loomData.size()));
+
+                // Move to next loom.
+                m_currentInsulationLoom++;
+                m_insulationNetMarkersSeen = 0;
+
+                // Process any other complete loom already buffered.
+                continue;
+            }
+
+            // --------------------------------------------------------
+            // FINAL TEST TERMINATOR
+            // --------------------------------------------------------
+
+            if (testEndIndex >= 0)
+            {
+                buffer.remove(
+                    0,
+                    testEndIndex + endMarker.size());
+
+                m_receivingInsulationResults = false;
+
+                qDebug() << "ABCDE received - test completed";
+
+                emit executeWriteToNotes("Test Completed");
+                emit insulationResultsCompleted();
+
+                return;
+            }
+
+            // No complete loom or final terminator is available yet.
             return;
         }
-
-        // --------------------------------------------------------
-        // ONE LOOM TERMINATOR
-        // --------------------------------------------------------
-
-        if (loomEndIndex < 0)
-        {
-            // Complete loom has not arrived yet.
-            return;
-        }
-
-        // --------------------------------------------------------
-        // One complete loom received
-        // --------------------------------------------------------
-
-        QByteArray loomData =
-                buffer.left(loomEndIndex);
-
-        // Remove loom data + FF 00
-        buffer.remove(
-            0,
-            loomEndIndex + loomEndMarker.size());
-
-        m_currentInsulationLoomData = loomData;
-
-        QByteArray failedMarker =
-                QByteArray::fromHex("2E2E");
-
-        bool loomFailed =
-                loomData.contains(failedMarker);
-
-        if(!loomFailed)
-        {
-            qDebug()
-                << "Insulation Loom"
-                << m_currentInsulationLoom + 1
-                << "PASS";
-
-            emit executeWriteToNotes(
-                QString("Insulation Loom %1 : PASS")
-                .arg(m_currentInsulationLoom + 1));
-
-            emit insulationLoomPassed(
-                m_currentInsulationLoom + 1);
-        }
-        else
-        {
-            qDebug()
-                << "Insulation Loom"
-                << m_currentInsulationLoom + 1
-                << "FAIL";
-
-            emit executeWriteToNotes(
-                QString("Insulation Loom %1 : FAIL")
-                .arg(m_currentInsulationLoom + 1));
-
-            emit insulationLoomFailed(
-                m_currentInsulationLoom + 1,
-                loomData);
-        }
-
-        qDebug()
-                << "INSULATION LOOM:"
-                << m_currentInsulationLoom + 1;
-
-        qDebug()
-                << "LOOM DATA:"
-                << loomData.toHex(' ').toUpper();
-
-        qDebug()
-                << "LOOM DATA SIZE:"
-                << loomData.size()
-                << "Bytes";
-
-        emit executeWriteToNotes(
-            QString("Insulation Loom %1 Result: %2")
-            .arg(m_currentInsulationLoom + 1)
-            .arg(QString::fromLatin1(
-                loomData.toHex(' ').toUpper())));
-
-        emit executeWriteToNotes(
-            QString("Insulation Loom %1 Result Size: %2 Bytes")
-            .arg(m_currentInsulationLoom + 1)
-            .arg(loomData.size()));
-
-        // Move to next loom
-        m_currentInsulationLoom++;
-        m_insulationNetMarkersSeen = 0;
-
-        return;
     }
+
 
 
 

@@ -1003,25 +1003,174 @@ bool MainWindow::processCsvFile(const QString &fileName,
 
     int lineNumber = 0;
 
-    while (!stream.atEnd()) {
+    enum class HarnessSection
+    {
+        Harness,
+        Relay,
+        Diode
+    };
 
+    HarnessSection currentSection = HarnessSection::Harness;
+    bool skipSectionHeader = false;
+
+    bool relayDataFound = false;
+    bool diodeDataFound = false;
+
+
+    while (!stream.atEnd())
+    {
         QString line = stream.readLine().trimmed();
         lineNumber++;
 
-        if (line.isEmpty()) continue;
+        if (line.isEmpty())
+            continue;
 
         QStringList parts = line.split(",");
 
-        if (std::all_of(parts.begin(), parts.end(),
-                        [](const QString &s){ return s.trimmed().isEmpty(); }))
+        // Remove only trailing empty columns.
+        // Preserve empty fields between populated columns.
+        while (!parts.isEmpty() && parts.last().trimmed().isEmpty())
         {
-            break; // use continue if you want to move further after empty line
+            parts.removeLast();
         }
 
-        if (type == "patch") {
-            if (parts.size() != 5) {
-                writeToNotes("Malformed PATCH line " + QString::number(lineNumber));
-                ui->textEdit_ErrorLog->append("Malformed PATCH line " + QString::number(lineNumber));
+        // Skip rows containing no actual values.
+        if (std::all_of(parts.begin(), parts.end(),
+                        [](const QString &s)
+                        {
+                            return s.trimmed().isEmpty();
+                        }))
+        {
+            continue;
+        }
+
+        // -------------------------------------------------
+        // Relay and Diode section detection (HARNESS upload only)
+        // -------------------------------------------------
+        if (type == "harness")
+        {
+            // A section marker must occupy the first three
+            // consecutive columns of the same row.
+            auto isSectionMarker = [&parts](const QString &marker)
+            {
+                return parts.size() >= 3 &&
+                       parts[0].trimmed() == marker &&
+                       parts[1].trimmed() == marker &&
+                       parts[2].trimmed() == marker;
+            };
+
+            if (isSectionMarker("#12345"))
+            {
+                currentSection = HarnessSection::Relay;
+                skipSectionHeader = true;
+
+                writeToNotes(
+                    "Relay section detected at line " +
+                    QString::number(lineNumber));
+
+                continue;
+            }
+
+            if (isSectionMarker("#54321"))
+            {
+                currentSection = HarnessSection::Diode;
+                skipSectionHeader = true;
+
+                writeToNotes(
+                    "Diode section detected at line " +
+                    QString::number(lineNumber));
+
+                continue;
+            }
+
+            // -------------------------------------------------
+            // Relay section: 10 columns
+            // -------------------------------------------------
+            if (currentSection == HarnessSection::Relay)
+            {
+                if (parts.size() != 10)
+                {
+                    QString error =
+                        "Relay row must contain 10 columns at line " +
+                        QString::number(lineNumber) +
+                        ". Found: " + QString::number(parts.size());
+
+                    writeToNotes("❌ " + error);
+                    ui->textEdit_ErrorLog->append("❌ " + error);
+                    file.close();
+                    return false;
+                }
+
+                if (skipSectionHeader)
+                {
+                    skipSectionHeader = false;
+
+                    writeToNotes(
+                        "Relay header validated at line " +
+                        QString::number(lineNumber));
+
+                    continue;
+                }
+
+                relayDataFound = true;
+
+                // Relay data row validated.
+                // Actual Relay processing will be implemented later.
+                continue;
+            }
+
+            // -------------------------------------------------
+            // Diode section: 6 columns
+            // -------------------------------------------------
+            if (currentSection == HarnessSection::Diode)
+            {
+                if (parts.size() != 6)
+                {
+                    QString error =
+                        "Diode row must contain 6 columns at line " +
+                        QString::number(lineNumber) +
+                        ". Found: " + QString::number(parts.size());
+
+                    writeToNotes("❌ " + error);
+                    ui->textEdit_ErrorLog->append("❌ " + error);
+                    file.close();
+                    return false;
+                }
+
+                if (skipSectionHeader)
+                {
+                    skipSectionHeader = false;
+
+                    writeToNotes(
+                        "Diode header validated at line " +
+                        QString::number(lineNumber));
+
+                    continue;
+                }
+
+                diodeDataFound = true;
+                // Diode data row validated.
+                // Actual Diode processing will be implemented now/later.
+                continue;
+            }
+        }
+
+        // -------------------------------------------------
+        // EXISTING PATCH PROCESSING — unchanged
+        // -------------------------------------------------
+        if (type == "patch")
+        {
+            if (parts.size() != 5)
+            {
+                writeToNotes(
+                    "Malformed PATCH line " +
+                    QString::number(lineNumber));
+
+                ui->textEdit_ErrorLog->append(
+                    "Malformed PATCH line " +
+                    QString::number(lineNumber));
+
+                file.close();
                 return false;
             }
 
@@ -1029,11 +1178,10 @@ bool MainWindow::processCsvFile(const QString &fileName,
             QString pPinStr = parts[4].trimmed();
 
             if (!validatePatchLine(lineNumber, pCon, pPinStr))
+            {
+                file.close();
                 return false;
-
-            //-------------------------------------------------
-            // Convert Logical TP(1-16) -> Physical TP (Edge Case TP15 -> 29,31 HANDLED)
-            //-------------------------------------------------
+            }
 
             int tpNo = pCon.section('-', 1).toInt();
             int pPin = pPinStr.toInt();
@@ -1045,15 +1193,9 @@ bool MainWindow::processCsvFile(const QString &fileName,
             else
             {
                 if (tpNo == 15)
-                {
-                    // TP15 has SLOT 29 and SLOT 31.
-                    // SLOT 30 is physically missing.
                     tpNo = 31;
-                }
                 else
-                {
                     tpNo = tpNo * 2;
-                }
 
                 pPin -= 64;
             }
@@ -1061,39 +1203,70 @@ bool MainWindow::processCsvFile(const QString &fileName,
             pCon = QString("TP-%1").arg(tpNo);
             pPinStr = QString::number(pPin);
 
-            // ⭐ LOG SUCCESSFUL PATCH LINE
-            writeToNotes("PATCH Line OK (" + QString::number(lineNumber) + "): " +
-                         parts[0].trimmed() + ", " +
-                    parts[1].trimmed() + ", " +
-                    parts[2].trimmed() + ", " +
-                    pCon + ", " + pPinStr);
+            writeToNotes(
+                "PATCH Line OK (" + QString::number(lineNumber) + "): " +
+                parts[0].trimmed() + ", " +
+                parts[1].trimmed() + ", " +
+                parts[2].trimmed() + ", " +
+                pCon + ", " + pPinStr);
 
             cableList.append(parts[0].trimmed());
             userConList.append(parts[1].trimmed());
             userPinList.append(parts[2].trimmed());
             patchConList.append(pCon);
             patchPinList.append(pPinStr.toInt());
-
         }
-        else if (type == "harness")
+        else if (type == "harness" &&
+                 currentSection == HarnessSection::Harness)
         {
             if (parts.size() != 6)
             {
-                writeToNotes("❌ Malformed HARNESS line " + QString::number(lineNumber));
-                 ui->textEdit_ErrorLog->append("❌ Malformed HARNESS line " + QString::number(lineNumber));
+                QString error =
+                    "Malformed HARNESS line " +
+                    QString::number(lineNumber) +
+                    ". Expected 6 columns, found " +
+                    QString::number(parts.size());
+
+                writeToNotes("❌ " + error);
+                ui->textEdit_ErrorLog->append("❌ " + error);
+
+                file.close();
                 return false;
             }
+
             cableTemp.append(parts[0].trimmed());
             sourceConTemp.append(parts[1].trimmed());
             sourcePinTemp.append(parts[2].trimmed());
             destConTemp.append(parts[3].trimmed());
             destPinTemp.append(parts[4].trimmed());
             expTemp.append(parts[5].trimmed());
-
         }
+        //continue from here ...
     }
 
+
     file.close();
+
+    if (type == "harness")
+    {
+        if (!relayDataFound)
+        {
+            const QString message =
+                "Relay data not detected in the uploaded file.";
+
+            writeToNotes(message);
+            ui->textEdit_ErrorLog->append(message);
+        }
+
+        if (!diodeDataFound)
+        {
+            const QString message =
+                "Diode data not detected in the uploaded file.";
+
+            writeToNotes(message);
+            ui->textEdit_ErrorLog->append(message);
+        }
+    }
 
     // 1️⃣ SAVE PATCH DATA HERE
     if (type == "patch") {
@@ -3963,6 +4136,19 @@ void MainWindow::populateInsulationTable(
 
     // Force the table to the top
     ui->tableView_InsuIso->scrollToTop();
+
+    // Disable editing
+    ui->tableView_InsuIso->setEditTriggers(
+                QAbstractItemView::NoEditTriggers);
+
+    // Allow only one row selection
+    ui->tableView_InsuIso->setSelectionBehavior(
+                QAbstractItemView::SelectRows);
+
+    ui->tableView_InsuIso->setSelectionMode(
+                QAbstractItemView::SingleSelection);
+
+    ui->tableView_InsuIso->setAlternatingRowColors(true);
 }
 
 QString MainWindow::getActualConnectorName(

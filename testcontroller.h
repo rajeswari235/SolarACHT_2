@@ -108,11 +108,6 @@ public:
         return m_receivingInsulationResults;
     }
 
-    void setCurrentInsulationTotalNets(int totalNets)
-    {
-        m_currentInsulationTotalNets = totalNets;
-    }
-
     void setInsulationLoomNetCounts(const QVector<int> &netCounts)
     {
         m_insulationNetsPerLoom = netCounts;
@@ -234,12 +229,9 @@ private:
 
     QVector<float> m_insulationResults;
 
-    QByteArray m_currentInsulationLoomData;
+    // Progress bar logic
     int m_currentInsulationLoom = 0;
-
-    int m_currentInsulationTotalNets = 0;
     int m_insulationNetMarkersSeen = 0;
-
     QVector<int> m_insulationNetsPerLoom;
 
 };
