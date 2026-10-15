@@ -743,8 +743,193 @@ void TestController::abortCommand()
     resultsOfSelfTestBytes.clear();
     m_twoWireResults.clear();
 
+    // Stop Diode
+    m_waitingForDiodeStartAck = false;
+    m_waitingForDiodePacketAck = false;
+    m_waitingForDiodeResults = false;
+
+    // Reset Diode packet state
+    m_currentDiodePacket = 0;
+    m_diodePackets.clear();
+
+    // Reset Diode result state
+    m_diodeResultsReceived = 0;
+
     emit executeWriteToNotes(
                 "Test Aborted");
+}
+
+bool TestController::mapDiodeToHardware(
+    const QVariantList &patchData,
+    const QVariantList &diodeData)
+{
+    if (!m_obj)
+        return false;
+
+    emit executeWriteToNotes("===========================================");
+    emit executeWriteToNotes("STEP-1: Diode Logical Connectors -> Hardware Pins");
+    emit executeWriteToNotes("===========================================");
+
+    // Clear previous Diode mappings
+    m_diodeCable.clear();
+    m_diodeAnodeCon.clear();
+    m_diodeAnodePin.clear();
+    m_diodeCathodeCon.clear();
+    m_diodeCathodePin.clear();
+    m_diodeExpVoltage.clear();
+
+    // -------- Extract PATCH data --------
+    QVector<QString> userCon, userPin, patchCon, patchPin;
+
+    for (const QVariant &v : patchData)
+    {
+        QVariantMap m = v.toMap();
+
+        userCon.append(m["userCon"].toString().simplified());
+        userPin.append(m["userPin"].toString().simplified());
+        patchCon.append(m["patchCon"].toString().simplified());
+        patchPin.append(QString::number(m["patchPin"].toInt()));
+    }
+
+    emit executeWriteToNotes(
+        QString("Patch rows loaded : %1").arg(userCon.size()));
+
+    // -------- Extract DIODE data --------
+    QVector<QString> cable, anodeCon, anodePin;
+    QVector<QString> cathodeCon, cathodePin, expVoltage;
+
+    for (const QVariant &v : diodeData)
+    {
+        QVariantMap m = v.toMap();
+
+        cable.append(m["cable"].toString());
+        anodeCon.append(m["anodeCon"].toString().simplified());
+        anodePin.append(m["anodePin"].toString().simplified());
+        cathodeCon.append(m["cathodeCon"].toString().simplified());
+        cathodePin.append(m["cathodePin"].toString().simplified());
+        expVoltage.append(m["expVoltage"].toString());
+    }
+
+    emit executeWriteToNotes(
+        QString("Diode rows loaded : %1").arg(anodeCon.size()));
+
+    // -------- Mapping process --------
+    bool mappingOk = true;
+    QString errorLog;
+
+    for (int i = 0; i < anodeCon.size(); ++i)
+    {
+        bool anodeFound = false;
+        bool cathodeFound = false;
+
+        // -------- Anode mapping --------
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (anodeCon[i] == userCon[j] &&
+                anodePin[i] == userPin[j])
+            {
+                m_diodeAnodeCon.append(patchCon[j]);
+                m_diodeAnodePin.append(patchPin[j]);
+                anodeFound = true;
+                break;
+            }
+        }
+
+        // -------- Cathode mapping --------
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (cathodeCon[i] == userCon[j] &&
+                cathodePin[i] == userPin[j])
+            {
+                m_diodeCathodeCon.append(patchCon[j]);
+                m_diodeCathodePin.append(patchPin[j]);
+                cathodeFound = true;
+                break;
+            }
+        }
+
+        if (!anodeFound || !cathodeFound)
+        {
+            mappingOk = false;
+
+            errorLog += QString(
+                "Row %1 mapping missing | ANODE(%2:%3) CATHODE(%4:%5)\n")
+                .arg(i + 1)
+                .arg(anodeCon[i])
+                .arg(anodePin[i])
+                .arg(cathodeCon[i])
+                .arg(cathodePin[i]);
+        }
+
+        m_diodeCable.append(cable[i]);
+        m_diodeExpVoltage.append(expVoltage[i]);
+    }
+
+    // -------- Validation result --------
+    if (!mappingOk)
+    {
+        emit executeWriteToNotes("Diode Mapping FAILED");
+        emit executeWriteToNotes(errorLog);
+
+        // Clear partial results after failure
+        m_diodeCable.clear();
+        m_diodeAnodeCon.clear();
+        m_diodeAnodePin.clear();
+        m_diodeCathodeCon.clear();
+        m_diodeCathodePin.clear();
+        m_diodeExpVoltage.clear();
+
+        return false;
+    }
+
+    // -------- Log successful mappings --------
+    emit executeWriteToNotes(
+        QString("Diode Mapping SUCCESS | Total Connections: %1")
+            .arg(m_diodeAnodeCon.size()));
+
+    for (int i = 0; i < m_diodeAnodeCon.size(); ++i)
+    {
+        emit executeWriteToNotes(
+            QString("DIODE MAP %1 : ANODE %2-%3 -> CATHODE %4-%5 | Expected: %6")
+                .arg(i + 1)
+                .arg(m_diodeAnodeCon[i])
+                .arg(m_diodeAnodePin[i])
+                .arg(m_diodeCathodeCon[i])
+                .arg(m_diodeCathodePin[i])
+                .arg(m_diodeExpVoltage[i]));
+    }
+
+    emit executeWriteToNotes("DIODE MAPPING COMPLETED SUCCESSFULLY");
+
+    return true;
+}
+
+void TestController::startDiodeTransmission(
+    const QByteArray &startPacket,
+    const QVector<QByteArray> &packets)
+{
+    if (!serial || !serial->isOpen() || packets.isEmpty())
+    {
+        emit executeWriteToNotes(
+            "Diode transmission failed: Serial closed or no packets.");
+        return;
+    }
+
+    m_diodePackets = packets;
+    m_currentDiodePacket = 0;
+
+    m_waitingForDiodeStartAck = true;
+    m_waitingForDiodePacketAck = false;
+    m_waitingForDiodeResults = false;
+
+    m_diodeResultsReceived = 0;
+
+    serial->write(startPacket);
+
+    emit executeWriteToNotes("Diode START packet sent");
+    emit executeWriteToNotes(
+        QString("Diode START HEX: %1")
+            .arg(QString(startPacket.toHex(' ').toUpper())));
 }
 
 void TestController::onReadyRead()
@@ -1122,6 +1307,105 @@ void TestController::onReadyRead()
     }
 
 
+
+    // =====================================================
+    // DIODE RESULT RECEPTION
+    // =====================================================
+
+    if (m_waitingForDiodeResults)
+    {
+        const QByteArray endMarker = "ABCDE";
+
+        // Check whether the test terminator has arrived.
+        int endIndex = buffer.indexOf(endMarker);
+
+        // Process only bytes preceding the terminator.
+        int dataEnd = (endIndex >= 0)
+                          ? endIndex
+                          : buffer.size();
+
+        // Every Diode result is exactly 6 ASCII bytes.
+        while (dataEnd >= 6)
+        {
+            QByteArray resultBytes = buffer.left(6);
+
+            QString rawResult =
+                QString::fromLatin1(resultBytes);
+
+            QString result;
+
+            if (rawResult == "PASS_C")
+                result = "PASS";
+            else if (rawResult == "PASS_R")
+                result = "REVERSE";
+            else if (rawResult == "FAIL_S")
+                result = "SHORT";
+            else if (rawResult == "FAIL_O")
+                result = "OPEN";
+            else if (rawResult == "FAIL_F")
+                result = "FAIL";
+            else
+            {
+                // Do not silently interpret unknown data
+                qDebug() << "Unknown Diode result:"
+                         << resultBytes.toHex(' ').toUpper();
+
+                emit executeWriteToNotes(
+                    QString("Unknown Diode result: %1")
+                        .arg(QString(
+                            resultBytes.toHex(' ').toUpper())));
+
+                // Discard this six-byte result field.
+                buffer.remove(0, 6);
+                dataEnd -= 6;
+                continue;
+            }
+
+            const int row = m_diodeResultsReceived++;
+
+            qDebug() << "Diode Result:"
+                     << row + 1 << result;
+
+            emit executeWriteToNotes(
+                QString("Diode Result %1: %2")
+                    .arg(row + 1)
+                    .arg(result));
+
+            emit diodeResultReceived(row, result);
+
+            buffer.remove(0, 6);
+            dataEnd -= 6;
+        }
+
+        // If the complete terminator has arrived, finish the test.
+        // Any incomplete result before it remains unprocessed above.
+        if (endIndex >= 0)
+        {
+            if (!buffer.left(endMarker.size()).startsWith(endMarker))
+            {
+                // Defensive check; normally the marker starts at byte 0
+                // after all complete results have been consumed.
+                return;
+            }
+
+            buffer.remove(0, endMarker.size());
+
+            m_waitingForDiodeResults = false;
+
+            qDebug() << "ABCDE received - Diode test completed";
+
+            emit executeWriteToNotes(
+                "Diode Result Transmission Completed");
+
+            emit diodeResultsCompleted();
+
+            return;
+        }
+
+        // Keep any incomplete result bytes for the next readyRead().
+        return;
+    }
+
     // =====================================================
     // INSULATION/ISOLATION RESULT RECEPTION
     // =====================================================
@@ -1357,6 +1641,28 @@ void TestController::onReadyRead()
             }
 
             // =================================================
+            // ACK for DIODE START packet
+            // =================================================
+            if (m_waitingForDiodeStartAck)
+            {
+                m_waitingForDiodeStartAck = false;
+                m_currentDiodePacket = 0;
+
+                if (!m_diodePackets.isEmpty())
+                {
+                    serial->write(m_diodePackets[0]);
+
+                    emit executeWriteToNotes("Diode TX Packet 1");
+                    emit executeWriteToNotes(
+                        QString(m_diodePackets[0].toHex(' ').toUpper()));
+
+                    m_waitingForDiodePacketAck = true;
+                }
+
+                continue;
+            }
+
+            // =================================================
             // ACK for TWO WIRE DATA Packet
             // =================================================
 
@@ -1451,6 +1757,45 @@ void TestController::onReadyRead()
 
                     emit executeWriteToNotes(
                         "Waiting for Insulation results...");
+                }
+
+                continue;
+            }
+
+            // =================================================
+            // ACK for DIODE DATA packet
+            // =================================================
+            if (m_waitingForDiodePacketAck)
+            {
+                m_currentDiodePacket++;
+
+                if (m_currentDiodePacket < m_diodePackets.size())
+                {
+                    // Send the next packet only after receiving ACK
+                    serial->write(m_diodePackets[m_currentDiodePacket]);
+
+                    emit executeWriteToNotes(
+                        QString("Diode TX Packet %1")
+                            .arg(m_currentDiodePacket + 1));
+
+                    emit executeWriteToNotes(
+                        QString(m_diodePackets[m_currentDiodePacket]
+                                    .toHex(' ').toUpper()));
+                }
+                else
+                {
+                    // All Diode packets acknowledged
+                    m_waitingForDiodePacketAck = false;
+                    m_waitingForDiodeResults = true;
+
+                    emit executeWriteToNotes(
+                        "Diode Transmission Completed");
+
+                    emit executeWriteToNotes(
+                        "Waiting for Diode results...");
+
+                    qDebug() << "Diode transmission complete;"
+                                " waiting for results.";
                 }
 
                 continue;

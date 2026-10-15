@@ -124,6 +124,30 @@ public:
     //Abort Command
     void abortCommand();
 
+    // Diode Test
+    bool mapDiodeToHardware(
+        const QVariantList &patchData,
+        const QVariantList &diodeData);
+
+    //Diode Test
+    QVector<QString> m_diodeCable;
+    QVector<QString> m_diodeAnodeCon;
+    QVector<QString> m_diodeAnodePin;
+    QVector<QString> m_diodeCathodeCon;
+    QVector<QString> m_diodeCathodePin;
+    QVector<QString> m_diodeExpVoltage;
+
+    void startDiodeTransmission(
+        const QByteArray &startPacket,
+        const QVector<QByteArray> &packets);
+
+    bool isDiodeTestRunning() const
+    {
+        return m_waitingForDiodeStartAck ||
+               m_waitingForDiodePacketAck ||
+               m_waitingForDiodeResults;
+    }
+
 private slots:
     void onReadyRead();
 
@@ -172,6 +196,12 @@ signals:
     void insulationResultsCompleted();
 
     void insulationNetMarkerReceived(int loomNo, int totalNets);
+
+    //Diode Test Signals ---------------------------
+
+    void diodeResultReceived(int row, const QString &result);
+    void diodeResultsCompleted();
+
 
 
 private:
@@ -233,6 +263,17 @@ private:
     int m_currentInsulationLoom = 0;
     int m_insulationNetMarkersSeen = 0;
     QVector<int> m_insulationNetsPerLoom;
+
+    //Diode Test
+    // Diode transmission state
+    QVector<QByteArray> m_diodePackets;
+    int m_currentDiodePacket = 0;
+
+    bool m_waitingForDiodeStartAck = false;
+    bool m_waitingForDiodePacketAck = false;
+    bool m_waitingForDiodeResults = false;
+
+    int m_diodeResultsReceived = 0;
 
 };
 
