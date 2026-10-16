@@ -1102,15 +1102,13 @@ bool MainWindow::processCsvFile(const QString &fileName,
     QVector<QString> relaySourceConTemp;
     QVector<QString> relaySourcePinTemp;
 
-    QVector<QString> relaySideSourceConTemp;
-    QVector<QString> relaySideSourcePinTemp;
+    QVector<QString> relaySideConTemp;
+    QVector<QString> relaySideRSPinsTemp;
 
     QVector<QString> relayDestConTemp;
     QVector<QString> relayDestPinTemp;
 
-    QVector<QString> relaySideDestConTemp;
-    QVector<QString> relaySideDestPinTemp;
-
+    QVector<QString> relayExcitationVoltageTemp;
     QVector<QString> relayExpTemp;
 
     // ⭐ IMPORTANT LOG ENTRY
@@ -1200,15 +1198,16 @@ bool MainWindow::processCsvFile(const QString &fileName,
                 continue;
             }
 
+
             // -------------------------------------------------
-            // Relay section: 10 columns
+            // Relay section: 9 columns
             // -------------------------------------------------
             if (currentSection == HarnessSection::Relay)
             {
-                if (parts.size() != 10)
+                if (parts.size() != 9)
                 {
                     QString error =
-                        "Relay row must contain 10 columns at line " +
+                        "Relay row must contain 9 columns at line " +
                         QString::number(lineNumber) +
                         ". Found: " + QString::number(parts.size());
 
@@ -1236,21 +1235,20 @@ bool MainWindow::processCsvFile(const QString &fileName,
                 relaySourceConTemp.append(parts[1].trimmed());
                 relaySourcePinTemp.append(parts[2].trimmed());
 
-                relaySideSourceConTemp.append(parts[3].trimmed());
-                relaySideSourcePinTemp.append(parts[4].trimmed());
+                relaySideConTemp.append(parts[3].trimmed());
+                relaySideRSPinsTemp.append(parts[4].trimmed());
 
                 relayDestConTemp.append(parts[5].trimmed());
                 relayDestPinTemp.append(parts[6].trimmed());
 
-                relaySideDestConTemp.append(parts[7].trimmed());
-                relaySideDestPinTemp.append(parts[8].trimmed());
-
-                relayExpTemp.append(parts[9].trimmed());
+                relayExcitationVoltageTemp.append(parts[7].trimmed());
+                relayExpTemp.append(parts[8].trimmed());
 
                 relayDataFound = true;
 
                 continue;
             }
+
 
             // -------------------------------------------------
             // Diode section: 6 columns
@@ -1478,32 +1476,30 @@ bool MainWindow::processCsvFile(const QString &fileName,
     if (type == "harness" && relayDataFound)
     {
         if (!validateRelayData(
-                relayCableTemp,
-                relaySourceConTemp,
-                relaySourcePinTemp,
-                relaySideSourceConTemp,
-                relaySideSourcePinTemp,
-                relayDestConTemp,
-                relayDestPinTemp,
-                relaySideDestConTemp,
-                relaySideDestPinTemp,
-                relayExpTemp))
+                    relayCableTemp,
+                    relaySourceConTemp,
+                    relaySourcePinTemp,
+                    relaySideConTemp,
+                    relaySideRSPinsTemp,
+                    relayDestConTemp,
+                    relayDestPinTemp,
+                    relayExcitationVoltageTemp,
+                    relayExpTemp))
         {
             return false;
         }
 
         if (!saveRelayToDb(
-                cableNameFromUI,
-                relayCableTemp,
-                relaySourceConTemp,
-                relaySourcePinTemp,
-                relaySideSourceConTemp,
-                relaySideSourcePinTemp,
-                relayDestConTemp,
-                relayDestPinTemp,
-                relaySideDestConTemp,
-                relaySideDestPinTemp,
-                relayExpTemp))
+                    cableNameFromUI,
+                    relayCableTemp,
+                    relaySourceConTemp,
+                    relaySourcePinTemp,
+                    relaySideConTemp,
+                    relaySideRSPinsTemp,
+                    relayDestConTemp,
+                    relayDestPinTemp,
+                    relayExcitationVoltageTemp,
+                    relayExpTemp))
         {
             QString error = "Failed to save RELAY data to DB";
 
@@ -1513,8 +1509,8 @@ bool MainWindow::processCsvFile(const QString &fileName,
         }
 
         writeToNotes(
-            "💾 Saved RELAY data to DB for cable: " +
-            cableNameFromUI);
+                    "💾 Saved RELAY data to DB for cable: " +
+                    cableNameFromUI);
     }
 
     writeToNotes("✅ CSV processed successfully → Cable: " +
@@ -2275,7 +2271,7 @@ void MainWindow::on_pushButton_delCable_clicked()
     if(reply == QMessageBox::Yes)
     {
         writeToNotes("calling del is problem");
-        bool del =deleteCable(selectedFile);
+        bool del = deleteCable(selectedFile);
         writeToNotes("del");
         if(del)
         {
@@ -4720,243 +4716,516 @@ bool MainWindow::saveDiodeToDb(
     return true;
 }
 
+
 bool MainWindow::validateRelayData(
     const QVector<QString> &cableTemp,
     const QVector<QString> &sourceConTemp,
     const QVector<QString> &sourcePinTemp,
-    const QVector<QString> &relaySourceConTemp,
-    const QVector<QString> &relaySourcePinTemp,
+    const QVector<QString> &relaySideConTemp,
+    const QVector<QString> &relaySideRSPinsTemp,
     const QVector<QString> &destConTemp,
     const QVector<QString> &destPinTemp,
-    const QVector<QString> &relayDestConTemp,
-    const QVector<QString> &relayDestPinTemp,
+    const QVector<QString> &excitationVoltageTemp,
     const QVector<QString> &expTemp)
 {
     const int count = cableTemp.size();
 
-    if (count == 0)
+    auto reportError = [this](const QString &error)
     {
-        QString error = "No Relay data available to validate.";
         writeToNotes("❌ " + error);
         ui->textEdit_ErrorLog->append("❌ " + error);
+    };
+
+    if (count == 0)
+    {
+        reportError("No Relay data available to validate.");
         return false;
     }
 
     if (sourceConTemp.size() != count ||
         sourcePinTemp.size() != count ||
-        relaySourceConTemp.size() != count ||
-        relaySourcePinTemp.size() != count ||
+        relaySideConTemp.size() != count ||
+        relaySideRSPinsTemp.size() != count ||
         destConTemp.size() != count ||
         destPinTemp.size() != count ||
-        relayDestConTemp.size() != count ||
-        relayDestPinTemp.size() != count ||
+        excitationVoltageTemp.size() != count ||
         expTemp.size() != count)
     {
-        QString error = "Relay validation failed: vector sizes do not match.";
-        writeToNotes("❌ " + error);
-        ui->textEdit_ErrorLog->append("❌ " + error);
+        reportError(
+            "Relay validation failed: vector sizes do not match.");
         return false;
     }
 
-    // Same as harness validation
-    QRegularExpression expRegex(
+    // Expected resistance formats, same as Harness
+    const QRegularExpression expRegex(
         R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s*±\s*[0-9]+[KM]?|[0-9]+-[0-9]+)$)",
         QRegularExpression::CaseInsensitiveOption);
 
+    // Excitation voltage must be an integer from 1V to 34V
+    const QRegularExpression voltageRegex(
+        R"(^([0-9]+)V$)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    // Relay side connector must be Relay_X
+    const QRegularExpression relayRegex(
+                R"(^Relay_([1-9][0-9]*)(?:\s+.*)?$)",
+                QRegularExpression::CaseInsensitiveOption);
+
+    QSet<QString> completedRelays;
+    QSet<QString> coilPairsSeen;
+
+    QString currentRelay;
+    bool currentRelayHasCoil = false;
+
     for (int i = 0; i < count; ++i)
     {
-        QStringList fields = {
+        const QString relay =
+            relaySideConTemp[i].simplified();
+
+        const QString rsPins =
+            relaySideRSPinsTemp[i].simplified();
+
+        const QString voltage =
+            excitationVoltageTemp[i].simplified();
+
+        const QString expected =
+            expTemp[i].simplified();
+
+        // ---------------------------------------------
+        // Required fields
+        // ---------------------------------------------
+
+        QStringList requiredFields = {
             cableTemp[i],
             sourceConTemp[i],
             sourcePinTemp[i],
-            relaySourceConTemp[i],
-            relaySourcePinTemp[i],
+            relay,
+            rsPins,
             destConTemp[i],
             destPinTemp[i],
-            relayDestConTemp[i],
-            relayDestPinTemp[i],
-            expTemp[i]
+            expected
         };
 
-        for (int col = 0; col < fields.size(); ++col)
+        for (int col = 0; col < requiredFields.size(); ++col)
         {
-            if (fields[col].trimmed().isEmpty())
+            if (requiredFields[col].trimmed().isEmpty())
             {
-                QString error =
-                    QString("Empty field in Relay row %1, column %2.")
+                reportError(
+                    QString("Empty required field in Relay row %1, column %2.")
                         .arg(i + 1)
-                        .arg(col + 1);
-
-                writeToNotes("❌ " + error);
-                ui->textEdit_ErrorLog->append("❌ " + error);
+                        .arg(col + 1));
                 return false;
             }
         }
 
-        QString expected = expTemp[i].trimmed();
+        // ---------------------------------------------
+        // Validate Relay_X naming
+        // ---------------------------------------------
+
+        const auto relayMatch = relayRegex.match(relay);
+
+        if (!relayMatch.hasMatch())
+        {
+            reportError(
+                QString("Invalid Relay-side connector at row %1: %2. "
+                        "Expected Relay_X.")
+                    .arg(i + 1)
+                    .arg(relay));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Relay groups must be contiguous.
+        // Each new group must start with X1&X2.
+        // ---------------------------------------------
+
+        if (relay != currentRelay)
+        {
+            if (!currentRelay.isEmpty())
+            {
+                if (!currentRelayHasCoil)
+                {
+                    reportError(
+                        QString("%1 has no mandatory X1&X2 pair.")
+                            .arg(currentRelay));
+                    return false;
+                }
+
+                completedRelays.insert(currentRelay);
+            }
+
+            if (completedRelays.contains(relay))
+            {
+                reportError(
+                    QString("%1 appears in multiple separate groups.")
+                        .arg(relay));
+                return false;
+            }
+
+            currentRelay = relay;
+            currentRelayHasCoil = false;
+
+            if (rsPins != "X1&X2")
+            {
+                reportError(
+                    QString("First row of %1 must use X1&X2. "
+                            "Found %2 at row %3.")
+                        .arg(relay)
+                        .arg(rsPins)
+                        .arg(i + 1));
+                return false;
+            }
+        }
+
+        // ---------------------------------------------
+        // Validate supported relay-side pin pairs
+        // ---------------------------------------------
+
+        const bool isXPair = (rsPins == "X1&X2");
+        const bool isYPair = (rsPins == "Y1&Y2");
+
+        const bool isContactPair =
+            rsPins.contains('&') &&
+            !isXPair &&
+            !isYPair;
+
+        if (!isXPair && !isYPair && !isContactPair)
+        {
+            reportError(
+                QString("Invalid RSPins at Relay row %1: %2")
+                    .arg(i + 1)
+                    .arg(rsPins));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // X1&X2 must occur exactly once per relay
+        // ---------------------------------------------
+
+        if (isXPair)
+        {
+            if (currentRelayHasCoil)
+            {
+                reportError(
+                    QString("%1 contains duplicate X1&X2 pairs.")
+                        .arg(relay));
+                return false;
+            }
+
+            currentRelayHasCoil = true;
+            coilPairsSeen.insert(relay);
+        }
+
+        // ---------------------------------------------
+        // Validate excitation voltage
+        // Required for X1&X2 and Y1&Y2 only.
+        // ---------------------------------------------
+
+        if (isXPair || isYPair)
+        {
+            const auto voltageMatch =
+                voltageRegex.match(voltage);
+
+            if (!voltageMatch.hasMatch())
+            {
+                reportError(
+                    QString("Relay row %1: %2 requires an excitation "
+                            "voltage in the format 1V to 34V.")
+                        .arg(i + 1)
+                        .arg(rsPins));
+                return false;
+            }
+
+            bool ok = false;
+            const int voltageValue =
+                voltageMatch.captured(1).toInt(&ok);
+
+            if (!ok || voltageValue < 1 || voltageValue > 34)
+            {
+                reportError(
+                    QString("Invalid excitation voltage at Relay row %1: %2. "
+                            "Allowed range is 1V to 34V.")
+                        .arg(i + 1)
+                        .arg(voltage));
+                return false;
+            }
+        }
+        else if (isContactPair && !voltage.isEmpty())
+        {
+            reportError(
+                QString("Relay row %1: excitation voltage must be empty "
+                        "for contact pair %2.")
+                    .arg(i + 1)
+                    .arg(rsPins));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Validate expected resistance
+        // ---------------------------------------------
 
         if (!expRegex.match(expected).hasMatch())
         {
-            QString error =
-                QString("Invalid Relay expValue at index %1: %2")
-                    .arg(i)
-                    .arg(expected);
-
-            writeToNotes("❌ " + error);
-            ui->textEdit_ErrorLog->append("❌ " + error);
+            reportError(
+                QString("Invalid expected resistance at Relay row %1: %2")
+                    .arg(i + 1)
+                    .arg(expected));
             return false;
         }
+
+        // ---------------------------------------------
+        // Source connector + pin must exist in Patch
+        // ---------------------------------------------
+
+        bool sourceFound = false;
+
+        for (int j = 0; j < userConList.size(); ++j)
+        {
+            if (sourceConTemp[i].simplified() ==
+                    userConList[j].simplified() &&
+                sourcePinTemp[i].simplified() ==
+                    userPinList[j].simplified())
+            {
+                sourceFound = true;
+                break;
+            }
+        }
+
+        if (!sourceFound)
+        {
+            reportError(
+                QString("Relay row %1: Source connector/pin %2 / %3 "
+                        "does not exist in Patch data.")
+                    .arg(i + 1)
+                    .arg(sourceConTemp[i])
+                    .arg(sourcePinTemp[i]));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Destination connector + pin must exist in Patch
+        // ---------------------------------------------
+
+        bool destFound = false;
+
+        for (int j = 0; j < userConList.size(); ++j)
+        {
+            if (destConTemp[i].simplified() ==
+                    userConList[j].simplified() &&
+                destPinTemp[i].simplified() ==
+                    userPinList[j].simplified())
+            {
+                destFound = true;
+                break;
+            }
+        }
+
+        if (!destFound)
+        {
+            reportError(
+                QString("Relay row %1: Destination connector/pin %2 / %3 "
+                        "does not exist in Patch data.")
+                    .arg(i + 1)
+                    .arg(destConTemp[i])
+                    .arg(destPinTemp[i]));
+            return false;
+        }
+    }
+
+    // Validate the final relay group
+    if (!currentRelay.isEmpty() && !currentRelayHasCoil)
+    {
+        reportError(
+            QString("%1 has no mandatory X1&X2 pair.")
+                .arg(currentRelay));
+        return false;
     }
 
     writeToNotes("✅ Relay data validation successful.");
     return true;
 }
 
+
 bool MainWindow::saveRelayToDb(
     const QString &cableName,
     const QVector<QString> &cableTemp,
     const QVector<QString> &sourceConTemp,
     const QVector<QString> &sourcePinTemp,
-    const QVector<QString> &relaySourceConTemp,
-    const QVector<QString> &relaySourcePinTemp,
+    const QVector<QString> &relaySideConTemp,
+    const QVector<QString> &relaySideRSPinsTemp,
     const QVector<QString> &destConTemp,
     const QVector<QString> &destPinTemp,
-    const QVector<QString> &relayDestConTemp,
-    const QVector<QString> &relayDestPinTemp,
+    const QVector<QString> &excitationVoltageTemp,
     const QVector<QString> &expTemp)
 {
-    QString tableName = cableName + "_relay";
-    tableName.replace(" ", "_");
+    const int count = cableTemp.size();
 
-    QSqlQuery q(db);
-
-    QString create =
-        "CREATE TABLE IF NOT EXISTS " + tableName + " ("
-        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
-        "cable TEXT,"
-        "sourceCon TEXT,"
-        "sourcePin TEXT,"
-        "relaySourceCon TEXT,"
-        "relaySourcePin TEXT,"
-        "destCon TEXT,"
-        "destPin TEXT,"
-        "relayDestCon TEXT,"
-        "relayDestPin TEXT,"
-        "exp TEXT"
-        ")";
-
-    if (!q.exec(create))
+    // Validate vector sizes.
+    if (count == 0 ||
+        sourceConTemp.size() != count ||
+        sourcePinTemp.size() != count ||
+        relaySideConTemp.size() != count ||
+        relaySideRSPinsTemp.size() != count ||
+        destConTemp.size() != count ||
+        destPinTemp.size() != count ||
+        excitationVoltageTemp.size() != count ||
+        expTemp.size() != count)
     {
-        QString error =
-            "Failed to create table " + tableName + ": " +
-            q.lastError().text();
-
-        writeToNotes("❌ " + error);
-        ui->textEdit_ErrorLog->append("❌ " + error);
+        writeToNotes("❌ Relay data vectors have inconsistent sizes.");
         return false;
     }
 
+    if (!db.isOpen())
+    {
+        writeToNotes("❌ Database is not open.");
+        return false;
+    }
+
+    const QString tableName = cableName + "_relay";
+
+    static const QRegularExpression validIdentifier(
+        R"(^[A-Za-z0-9_]+$)");
+
+    if (!validIdentifier.match(tableName).hasMatch())
+    {
+        writeToNotes("❌ Invalid Relay table name.");
+        return false;
+    }
+
+    QSqlQuery query(db);
+
+    // Create the table if it does not exist.
+    const QString createSql =
+        QString(R"(
+            CREATE TABLE IF NOT EXISTS "%1" (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cable TEXT,
+                sourceCon TEXT,
+                sourcePin TEXT,
+                relaySideCon TEXT,
+                relaySideRSPins TEXT,
+                destCon TEXT,
+                destPin TEXT,
+                excitationVoltage TEXT,
+                exp TEXT
+            )
+        )").arg(tableName);
+
+    if (!query.exec(createSql))
+    {
+        writeToNotes(
+            "❌ Failed to create Relay table: " +
+            query.lastError().text());
+        return false;
+    }
+
+    // Start transaction.
     if (!db.transaction())
     {
-        QString error =
-            "Failed to start Relay transaction: " +
-            db.lastError().text();
-
-        writeToNotes("❌ " + error);
-        ui->textEdit_ErrorLog->append("❌ " + error);
+        writeToNotes(
+            "❌ Failed to start Relay transaction: " +
+            db.lastError().text());
         return false;
     }
 
-    if (!q.exec("DELETE FROM " + tableName))
+    // Insert Relay data without deleting existing records.
+    const QString insertSql =
+        QString(R"(
+            INSERT INTO "%1" (
+                cable,
+                sourceCon,
+                sourcePin,
+                relaySideCon,
+                relaySideRSPins,
+                destCon,
+                destPin,
+                excitationVoltage,
+                exp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        )").arg(tableName);
+
+    if (!query.prepare(insertSql))
     {
-        QString error =
-            "Failed to clear table " + tableName + ": " +
-            q.lastError().text();
+        writeToNotes(
+            "❌ Relay prepare failed: " +
+            query.lastError().text());
 
         db.rollback();
-
-        writeToNotes("❌ " + error);
-        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
-    q.prepare(
-        "INSERT INTO " + tableName +
-        " (cable, sourceCon, sourcePin, "
-        "relaySourceCon, relaySourcePin, "
-        "destCon, destPin, relayDestCon, relayDestPin, exp) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-
-    for (int i = 0; i < cableTemp.size(); ++i)
+    for (int i = 0; i < count; ++i)
     {
-        q.addBindValue(cableTemp[i]);
-        q.addBindValue(sourceConTemp[i]);
-        q.addBindValue(sourcePinTemp[i]);
-        q.addBindValue(relaySourceConTemp[i]);
-        q.addBindValue(relaySourcePinTemp[i]);
-        q.addBindValue(destConTemp[i]);
-        q.addBindValue(destPinTemp[i]);
-        q.addBindValue(relayDestConTemp[i]);
-        q.addBindValue(relayDestPinTemp[i]);
-        q.addBindValue(expTemp[i]);
+        query.bindValue(0, cableTemp[i]);
+        query.bindValue(1, sourceConTemp[i]);
+        query.bindValue(2, sourcePinTemp[i]);
+        query.bindValue(3, relaySideConTemp[i]);
+        query.bindValue(4, relaySideRSPinsTemp[i]);
+        query.bindValue(5, destConTemp[i]);
+        query.bindValue(6, destPinTemp[i]);
+        query.bindValue(7, excitationVoltageTemp[i]);
+        query.bindValue(8, expTemp[i]);
 
-        if (!q.exec())
+        if (!query.exec())
         {
-            QString error =
-                "Relay insert failed in " + tableName + ": " +
-                q.lastError().text();
+            writeToNotes(
+                QString("❌ Relay insert failed at row %1: %2")
+                    .arg(i + 1)
+                    .arg(query.lastError().text()));
 
             db.rollback();
-
-            writeToNotes("❌ " + error);
-            ui->textEdit_ErrorLog->append("❌ " + error);
             return false;
         }
     }
 
     if (!db.commit())
     {
-        QString error =
-            "Failed to commit Relay transaction: " +
-            db.lastError().text();
+        writeToNotes(
+            "❌ Relay commit failed: " +
+            db.lastError().text());
 
         db.rollback();
-
-        writeToNotes("❌ " + error);
-        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
-    writeToNotes("✅ Relay data stored in table: " + tableName);
+    writeToNotes(
+        QString("✅ Saved %1 Relay rows to table: %2")
+            .arg(count)
+            .arg(tableName));
+
     return true;
 }
+
 
 void MainWindow::loadRelayTable(const QString &tableName)
 {
     relayModel->setTable(tableName);
 
     if (!relayModel->select())
-       {
-           writeToNotes("Relay table unavailable: " + tableName);
+    {
+        writeToNotes("Relay table unavailable: " + tableName);
 
-           relayModel->clear();
+        relayModel->clear();
 
-           return;
-       }
+        return;
+    }
 
     relayModel->setHeaderData(1, Qt::Horizontal, "Cable");
     relayModel->setHeaderData(2, Qt::Horizontal, "Source Con");
     relayModel->setHeaderData(3, Qt::Horizontal, "Source Pin");
-    relayModel->setHeaderData(4, Qt::Horizontal, "Relay Source Con");
-    relayModel->setHeaderData(5, Qt::Horizontal, "Relay Source Pin");
+    relayModel->setHeaderData(4, Qt::Horizontal, "Relay Side Con");
+    relayModel->setHeaderData(5, Qt::Horizontal, "Relay Side Pins");
     relayModel->setHeaderData(6, Qt::Horizontal, "Dest Con");
     relayModel->setHeaderData(7, Qt::Horizontal, "Dest Pin");
-    relayModel->setHeaderData(8, Qt::Horizontal, "Relay Dest Con");
-    relayModel->setHeaderData(9, Qt::Horizontal, "Relay Dest Pin");
-    relayModel->setHeaderData(10, Qt::Horizontal, "Expected");
+    relayModel->setHeaderData(8, Qt::Horizontal, "Excitation Voltage");
+    relayModel->setHeaderData(9, Qt::Horizontal, "Expected");
 
+    // Hide the internal database ID.
+    relayModel->setHeaderData(0, Qt::Horizontal, "ID");
     ui->tableView_Relay->hideColumn(0);
 }
+
 
 void MainWindow::loadDiodeTable(const QString &tableName)
 {
@@ -5291,7 +5560,492 @@ void MainWindow::populateDiodeTestTable(
     // =====================================================
 
     ui->tableView_diodeTest->verticalHeader()
-        ->setDefaultSectionSize(28);
+            ->setDefaultSectionSize(28);
+}
+
+QVector<QByteArray> MainWindow::constructUARTPacketsForRelay(
+    const QVector<QString>& sourceCon,
+    const QVector<QString>& sourcePin,
+    const QVector<QString>& relaySideCon,
+    const QVector<QString>& relaySideRSPins,
+    const QVector<QString>& destCon,
+    const QVector<QString>& destPin,
+    const QVector<QString>& excitationVoltage,
+    const QVector<QString>& expected)
+{
+    QVector<QByteArray> packets;
+
+    constexpr int MAX_PACKET_SIZE = 1024;
+    constexpr int HEADER_SIZE = 6;
+    constexpr int MAX_INNER_LENGTH = 255;
+
+    const int rowCount = sourceCon.size();
+
+    // ---------------------------------------------------------
+    // 1. Validate vector sizes
+    // ---------------------------------------------------------
+    if (rowCount == 0 ||
+        sourcePin.size() != rowCount ||
+        relaySideCon.size() != rowCount ||
+        relaySideRSPins.size() != rowCount ||
+        destCon.size() != rowCount ||
+        destPin.size() != rowCount ||
+        excitationVoltage.size() != rowCount ||
+        expected.size() != rowCount)
+    {
+        writeToNotes("Relay packet error: Invalid or empty vectors.");
+        return {};
+    }
+
+    // ---------------------------------------------------------
+    // 2. Helper: encode a float as IEEE-754, MSB first
+    // ---------------------------------------------------------
+    auto appendFloatBE = [](QByteArray& data, float value)
+    {
+        quint32 bits = 0;
+        static_assert(sizeof(bits) == sizeof(value),
+                      "Float must be 32 bits");
+
+        memcpy(&bits, &value, sizeof(bits));
+
+        data.append(static_cast<char>((bits >> 24) & 0xFF));
+        data.append(static_cast<char>((bits >> 16) & 0xFF));
+        data.append(static_cast<char>((bits >> 8) & 0xFF));
+        data.append(static_cast<char>(bits & 0xFF));
+    };
+
+    // ---------------------------------------------------------
+    // 3. Helper: convert TP connector and pin to uint8
+    // ---------------------------------------------------------
+    auto parseEndpoint = [](const QString& connector,
+                            const QString& pin,
+                            quint8& connectorNumber,
+                            quint8& pinNumber) -> bool
+    {
+        const QRegularExpression connectorRegex(
+            R"(^TP-([0-9]+)(?:-|$))",
+            QRegularExpression::CaseInsensitiveOption);
+
+        const QRegularExpressionMatch match =
+            connectorRegex.match(connector.trimmed());
+
+        if (!match.hasMatch())
+            return false;
+
+        bool connectorOk = false;
+        bool pinOk = false;
+
+        const uint con =
+            match.captured(1).toUInt(&connectorOk);
+
+        const uint pinValue =
+            pin.trimmed().toUInt(&pinOk);
+
+        if (!connectorOk || !pinOk ||
+            con > 255 || pinValue > 255)
+        {
+            return false;
+        }
+
+        connectorNumber = static_cast<quint8>(con);
+        pinNumber = static_cast<quint8>(pinValue);
+
+        return true;
+    };
+
+    // ---------------------------------------------------------
+    // 4. Helper: parse coil Expected value as min-max resistance
+    //    Example: "400-600"
+    // ---------------------------------------------------------
+    auto parseResistanceRange = [](const QString& value,
+                                   quint16& minimum,
+                                   quint16& maximum) -> bool
+    {
+        static const QRegularExpression rangeRegex(
+            R"(^\s*(\d+)\s*-\s*(\d+)\s*$)");
+
+        const QRegularExpressionMatch match =
+            rangeRegex.match(value);
+
+        if (!match.hasMatch())
+            return false;
+
+        bool minOk = false;
+        bool maxOk = false;
+
+        const uint minValue = match.captured(1).toUInt(&minOk);
+        const uint maxValue = match.captured(2).toUInt(&maxOk);
+
+        if (!minOk || !maxOk ||
+            minValue > 65535 || maxValue > 65535 ||
+            minValue > maxValue)
+        {
+            return false;
+        }
+
+        minimum = static_cast<quint16>(minValue);
+        maximum = static_cast<quint16>(maxValue);
+
+        return true;
+    };
+
+    // ---------------------------------------------------------
+    // 5. Build complete Relay groups
+    // ---------------------------------------------------------
+    struct RelayGroup
+    {
+        quint8 relayId = 0;
+        QByteArray bytes;
+    };
+
+    QVector<RelayGroup> groups;
+
+    int row = 0;
+
+    while (row < rowCount)
+    {
+        const QRegularExpression relayRegex(
+            R"(^Relay_([1-9][0-9]*)(?:\s+.*)?$)",
+            QRegularExpression::CaseInsensitiveOption);
+
+        const QRegularExpressionMatch relayMatch =
+            relayRegex.match(relaySideCon[row].trimmed());
+
+        if (!relayMatch.hasMatch())
+        {
+            writeToNotes(QString("Relay packet error: Invalid relay name at row %1").arg(row));
+            return {};
+        }
+
+        bool relayIdOk = false;
+
+        const uint relayIdValue =
+            relayMatch.captured(1).toUInt(&relayIdOk);
+
+        if (!relayIdOk || relayIdValue > 255)
+        {
+            writeToNotes("Relay packet error: Relay ID exceeds uint8.");
+            return {};
+        }
+
+        const quint8 relayId =
+            static_cast<quint8>(relayIdValue);
+
+        const int groupStart = row;
+
+        // Gather consecutive rows belonging to this Relay_X.
+        while (row < rowCount)
+        {
+            const QRegularExpressionMatch currentMatch =
+                relayRegex.match(relaySideCon[row].trimmed());
+
+            if (!currentMatch.hasMatch())
+                return {};
+
+            bool currentIdOk = false;
+
+            const uint currentId =
+                currentMatch.captured(1).toUInt(&currentIdOk);
+
+            if (!currentIdOk)
+                return {};
+
+            if (currentId != relayIdValue)
+                break;
+
+            ++row;
+        }
+
+        const int groupEnd = row;
+
+        int xCoilRow = -1;
+        int yCoilRow = -1;
+
+        // -----------------------------------------------------
+        // Identify the coil rows and validate group contents
+        // -----------------------------------------------------
+        for (int i = groupStart; i < groupEnd; ++i)
+        {
+            const QString rsPins =
+                relaySideRSPins[i].trimmed().toUpper();
+
+            if (rsPins == "X1&X2")
+            {
+                if (xCoilRow != -1)
+                {
+                    writeToNotes(QString("Duplicate X1&X2 in Relay %1").arg(relayIdValue));
+                    return {};
+                }
+
+                xCoilRow = i;
+            }
+            else if (rsPins == "Y1&Y2")
+            {
+                if (yCoilRow != -1)
+                {
+                    writeToNotes(QString("Duplicate Y1&Y2 in Relay %1").arg(relayIdValue));
+                    return {};
+                }
+
+                yCoilRow = i;
+            }
+        }
+
+        // Every group must have its X1&X2 coil.
+        if (xCoilRow == -1)
+        {
+            writeToNotes(QString("Relay packet error: Missing X1&X2 in Relay %1").arg(relayIdValue));
+            return {};
+        }
+
+        const bool isLatch = (yCoilRow != -1);
+
+        // -----------------------------------------------------
+        // 6. Parse excitation voltage from the X1&X2 row
+        // -----------------------------------------------------
+        QString voltageText =
+            excitationVoltage[xCoilRow].trimmed();
+
+        if (voltageText.endsWith('V', Qt::CaseInsensitive))
+            voltageText.chop(1);
+
+        bool voltageOk = false;
+        const float voltage = voltageText.trimmed().toFloat(
+            &voltageOk);
+
+        if (!voltageOk || voltage <= 0.0f)
+        {
+            writeToNotes(QString("Relay packet error: Invalid excitation voltage %1")
+                         .arg(excitationVoltage[xCoilRow]));
+            return {};
+        }
+
+        // -----------------------------------------------------
+        // 7. Build the inner Relay data
+        // -----------------------------------------------------
+        QByteArray innerData;
+
+        auto appendCoil = [&](int coilRow) -> bool
+        {
+            quint8 srcConByte = 0;
+            quint8 srcPinByte = 0;
+            quint8 dstConByte = 0;
+            quint8 dstPinByte = 0;
+
+            if (!parseEndpoint(sourceCon[coilRow],
+                               sourcePin[coilRow],
+                               srcConByte,
+                               srcPinByte) ||
+                !parseEndpoint(destCon[coilRow],
+                               destPin[coilRow],
+                               dstConByte,
+                               dstPinByte))
+            {
+                writeToNotes(QString("Relay packet error: Invalid coil endpoints Relay: %1 row: %2")
+                             .arg(relayIdValue).arg(coilRow));
+                return false;
+            }
+
+            quint16 minResistance = 0;
+            quint16 maxResistance = 0;
+
+            if (!parseResistanceRange(expected[coilRow],
+                                      minResistance,
+                                      maxResistance))
+            {
+                writeToNotes(QString("Relay packet error: Invalid coil resistance range %1")
+                             .arg(expected[coilRow]));
+                return false;
+            }
+
+            innerData.append(static_cast<char>(srcConByte));
+            innerData.append(static_cast<char>(srcPinByte));
+            innerData.append(static_cast<char>(dstConByte));
+            innerData.append(static_cast<char>(dstPinByte));
+
+            // Minimum resistance: uint16, MSB first
+            innerData.append(static_cast<char>((minResistance >> 8) & 0xFF));
+            innerData.append(static_cast<char>(minResistance & 0xFF));
+
+            // Maximum resistance: uint16, MSB first
+            innerData.append(static_cast<char>((maxResistance >> 8) & 0xFF));
+            innerData.append(static_cast<char>(maxResistance & 0xFF));
+
+            return true;
+        };
+
+        // X1&X2 always comes first.
+        if (!appendCoil(xCoilRow))
+            return {};
+
+        // Y1&Y2 is present only for latch relays.
+        if (isLatch && !appendCoil(yCoilRow))
+            return {};
+
+        // Append all NO/NC contact rows without resistance floats.
+        for (int i = groupStart; i < groupEnd; ++i)
+        {
+            const QString rsPins =
+                relaySideRSPins[i].trimmed().toUpper();
+
+            if (rsPins == "X1&X2" || rsPins == "Y1&Y2")
+                continue;
+
+            quint8 srcConByte = 0;
+            quint8 srcPinByte = 0;
+            quint8 dstConByte = 0;
+            quint8 dstPinByte = 0;
+
+            if (!parseEndpoint(sourceCon[i],
+                               sourcePin[i],
+                               srcConByte,
+                               srcPinByte) ||
+                !parseEndpoint(destCon[i],
+                               destPin[i],
+                               dstConByte,
+                               dstPinByte))
+            {
+                writeToNotes(QString("Relay packet error: Invalid contact endpoints Relay: %1 row: %2")
+                             .arg(relayIdValue).arg(i));
+                return {};
+            }
+
+            innerData.append(static_cast<char>(srcConByte));
+            innerData.append(static_cast<char>(srcPinByte));
+            innerData.append(static_cast<char>(dstConByte));
+            innerData.append(static_cast<char>(dstPinByte));
+        }
+
+        // The inner data length is uint8. Never split a group.
+        if (innerData.size() > MAX_INNER_LENGTH)
+        {
+            writeToNotes(QString("Relay packet error: Inner data exceeds 255 bytes. Relay: %1 Length: %2")
+                         .arg(relayIdValue).arg(innerData.size()));
+            return {};
+        }
+
+        // -----------------------------------------------------
+        // 8. Build the Relay group record
+        // -----------------------------------------------------
+        RelayGroup group;
+        group.relayId = relayId;
+
+        group.bytes.append(static_cast<char>(relayId));
+
+        group.bytes.append(
+            static_cast<char>(isLatch ? 0xAE : 0xEA));
+
+        appendFloatBE(group.bytes, voltage);
+
+        group.bytes.append(
+            static_cast<char>(innerData.size()));
+
+        group.bytes.append(innerData);
+
+        groups.append(group);
+
+        writeToNotes(
+            QString("Relay group built: ID = %1, Type = %2, Inner length = %3")
+                .arg(relayIdValue)
+                .arg(isLatch ? "Latch" : "Non-latch")
+                .arg(innerData.size()));
+
+        writeToNotes(
+            QString("Relay %1 Inner Data (HEX): %2")
+                .arg(relayIdValue)
+                .arg(QString::fromLatin1(innerData.toHex(' ').toUpper())));
+
+        writeToNotes(
+            QString("Relay %1 Complete Group Bytes (HEX): %2")
+                .arg(relayIdValue)
+                .arg(QString::fromLatin1(group.bytes.toHex(' ').toUpper())));
+    }
+
+    // ---------------------------------------------------------
+    // 9. Pack complete Relay groups into outer packets
+    // ---------------------------------------------------------
+    QByteArray payload;
+    quint16 packetNo = 1;
+    int groupsInPacket = 0;
+
+    auto finalizePacket = [&]()
+    {
+        if (groupsInPacket == 0)
+            return;
+
+        QByteArray packet;
+
+        // Header: 2F 2F
+        packet.append(static_cast<char>(0x2F));
+        packet.append(static_cast<char>(0x2F));
+
+        // Packet number, uint16 MSB first.
+        packet.append(static_cast<char>((packetNo >> 8) & 0xFF));
+        packet.append(static_cast<char>(packetNo & 0xFF));
+
+        // Payload length, uint16 MSB first; excludes 6-byte header.
+        const quint16 dataLength =
+            static_cast<quint16>(payload.size());
+
+        packet.append(static_cast<char>((dataLength >> 8) & 0xFF));
+        packet.append(static_cast<char>(dataLength & 0xFF));
+
+        packet.append(payload);
+
+        if (packet.size() > MAX_PACKET_SIZE)
+        {
+            writeToNotes("Relay packet error: Outer packet exceeds 1024 bytes.");
+            packets.clear();
+            return;
+        }
+
+        packets.append(packet);
+
+        writeToNotes(QString("Relay packet: Packet No = %1 Groups = %2 Data length = %3 Total bytes = %4")
+                     .arg(packetNo)
+                     .arg(groupsInPacket)
+                     .arg(dataLength)
+                     .arg(packet.size()));
+
+        ++packetNo;
+        payload.clear();
+        groupsInPacket = 0;
+    };
+
+    for (const RelayGroup& group : groups)
+    {
+        const int projectedSize =
+            HEADER_SIZE + payload.size() + group.bytes.size();
+
+        if (groupsInPacket > 0 &&
+            projectedSize > MAX_PACKET_SIZE)
+        {
+            finalizePacket();
+
+            // Abort if packet finalization detected an error.
+            if (packets.isEmpty())
+                return {};
+        }
+
+        // A single complete group must fit in one outer packet.
+        if (HEADER_SIZE + group.bytes.size() > MAX_PACKET_SIZE)
+        {
+            writeToNotes("Relay packet error: Single group cannot fit.");
+            return {};
+        }
+
+        payload.append(group.bytes);
+        ++groupsInPacket;
+    }
+
+    finalizePacket();
+
+    if (packets.isEmpty())
+        return {};
+
+    writeToNotes(QString("Total Relay packets generated: %1").arg(packets.size()));
+
+    return packets;
 }
 
 void MainWindow::onPortSelected(const QString &portName)
@@ -5328,7 +6082,7 @@ void MainWindow::on_pushButton_run_clicked()
     QVariantList patch = getPatchData(cableName);
     QVariantList harness = getHarnessData(cableName);
     QVariantList diode   = getDiodeData(cableName);
-    //QVariantList relay   = getRelayData(cableName);
+    QVariantList relay   = getRelayData(cableName);
 
     if(patch.length() ==0||harness.length()==0)
     {
@@ -5459,20 +6213,75 @@ void MainWindow::on_pushButton_run_clicked()
     // -------------------------------------------------
     // Relay Test BLOCK Start
     // -------------------------------------------------
-//    if (ui->comboBox_test->currentText() == "Relay")
-//    {
-//        if (patch.isEmpty() || relay.isEmpty())
-//        {
-//            QMessageBox::information(
-//                this,
-//                "Data Missing",
-//                "No Patch/Relay data found for this cable!");
-//            return;
-//        }
+    if (ui->comboBox_test->currentText() == "Relay")
+    {
+        if (patch.isEmpty() || relay.isEmpty())
+        {
+            QMessageBox::information(
+                this,
+                "Data Missing",
+                "No Patch/Relay data found for this cable!");
+            return;
+        }
 
-//        // Relay mapping will use Patch + Relay.
-//        // We will add the mapping function according to your flow.
-//    }
+
+        if (!test->mapRelayToHardware(patch, relay))
+        {
+            QMessageBox::warning(
+                this, "Error", "Patch to Relay mapping failed.");
+            return;
+        }
+
+        QVector<QByteArray> relayPackets =
+            constructUARTPacketsForRelay(
+                test->m_relaySourceCon,
+                test->m_relaySourcePin,
+                test->m_relaySideCon,
+                test->m_relaySideRSPins,
+                test->m_relayDestCon,
+                test->m_relayDestPin,
+                test->m_relayExcitationVoltage,
+                test->m_relayExp);
+
+        if (relayPackets.isEmpty())
+        {
+            QMessageBox::warning(
+                this,
+                "Relay Packet Error",
+                "Failed to construct Relay UART packets. Check the debug output.");
+            return;
+        }
+
+        // ---------------------------------------------------------
+        // Print our precious Relay packets
+        // ---------------------------------------------------------
+        writeToNotes(
+            QString("========== RELAY PACKETS GENERATED: %1 ==========")
+                .arg(relayPackets.size()));
+
+        for (int i = 0; i < relayPackets.size(); ++i)
+        {
+            const QByteArray &packet = relayPackets[i];
+
+            const QString hexData =
+                QString::fromLatin1(packet.toHex(' ').toUpper());
+
+            writeToNotes(
+                QString("Relay Packet %1 | Size: %2 bytes")
+                    .arg(i + 1)
+                    .arg(packet.size()));
+
+            writeToNotes(hexData);
+
+            qDebug().noquote()
+                << QString("Relay Packet %1 (%2 bytes): %3")
+                       .arg(i + 1)
+                       .arg(packet.size())
+                       .arg(hexData);
+        }
+
+        writeToNotes("========== END OF RELAY PACKETS ==========");
+    }
     // -------------------------------------------------
     // Relay Test BLOCK End
     // -------------------------------------------------
@@ -6083,6 +6892,70 @@ QVariantList MainWindow::getDiodeData(const QString &cableName)
 
     return rows;
 }
+
+
+QVariantList MainWindow::getRelayData(const QString &cableName)
+{
+    QVariantList rows;
+
+    if (!db.isOpen())
+    {
+        writeToNotes("getRelayData: DB not open");
+        return rows;
+    }
+
+    const QString tableName = cableName + "_relay";
+
+    if (!db.tables().contains(tableName))
+    {
+        writeToNotes("getRelayData: Table not found -> " + tableName);
+        return rows;
+    }
+
+    const QString sql =
+        QString(
+            "SELECT cable, sourceCon, sourcePin, "
+            "relaySideCon, relaySideRSPins, "
+            "destCon, destPin, excitationVoltage, exp "
+            "FROM \"%1\"")
+            .arg(tableName);
+
+    QSqlQuery q(db);
+
+    if (!q.exec(sql))
+    {
+        writeToNotes(
+            "getRelayData: query failed -> " +
+            q.lastError().text());
+
+        return rows;
+    }
+
+    while (q.next())
+    {
+        QVariantMap m;
+
+        m["cable"]             = q.value(0).toString();
+        m["sourceCon"]         = q.value(1).toString();
+        m["sourcePin"]         = q.value(2).toString();
+        m["relaySideCon"]      = q.value(3).toString();
+        m["relaySideRSPins"]   = q.value(4).toString();
+        m["destCon"]           = q.value(5).toString();
+        m["destPin"]           = q.value(6).toString();
+        m["excitationVoltage"] = q.value(7).toString();
+        m["exp"]               = q.value(8).toString();
+
+        rows.append(m);
+    }
+
+    writeToNotes(
+        QString("getRelayData: %1 rows for %2")
+            .arg(rows.size())
+            .arg(cableName));
+
+    return rows;
+}
+
 
 
 void MainWindow::on_pushButton_back_clicked()

@@ -130,26 +130,26 @@ public:
          const QVector<QString> &cableTemp,
          const QVector<QString> &sourceConTemp,
          const QVector<QString> &sourcePinTemp,
-         const QVector<QString> &relaySourceConTemp,
-         const QVector<QString> &relaySourcePinTemp,
+         const QVector<QString> &relaySideConTemp,
+         const QVector<QString> &relaySideRSPinsTemp,
          const QVector<QString> &destConTemp,
          const QVector<QString> &destPinTemp,
-         const QVector<QString> &relayDestConTemp,
-         const QVector<QString> &relayDestPinTemp,
+         const QVector<QString> &excitationVoltageTemp,
          const QVector<QString> &expTemp);
+
 
      bool saveRelayToDb(
          const QString &cableName,
          const QVector<QString> &cableTemp,
          const QVector<QString> &sourceConTemp,
          const QVector<QString> &sourcePinTemp,
-         const QVector<QString> &relaySourceConTemp,
-         const QVector<QString> &relaySourcePinTemp,
+         const QVector<QString> &relaySideConTemp,
+         const QVector<QString> &relaySideRSPinsTemp,
          const QVector<QString> &destConTemp,
          const QVector<QString> &destPinTemp,
-         const QVector<QString> &relayDestConTemp,
-         const QVector<QString> &relayDestPinTemp,
+         const QVector<QString> &excitationVoltageTemp,
          const QVector<QString> &expTemp);
+
 
      void loadRelayTable(const QString &tableName);
 
@@ -165,6 +165,17 @@ public:
      QByteArray constructDiodeStartPacket(quint16 totalPackets);
 
      void populateDiodeTestTable(const QVariantList &diode);
+
+     //Relay Test
+     QVector<QByteArray> constructUARTPacketsForRelay(
+         const QVector<QString>& sourceCon,
+         const QVector<QString>& sourcePin,
+         const QVector<QString>& relaySideCon,
+         const QVector<QString>& relaySideRSPins,
+         const QVector<QString>& destCon,
+         const QVector<QString>& destPin,
+         const QVector<QString>& excitationVoltage,
+         const QVector<QString>& expected);
 
 private slots:
      void on_pushButton_Save_clicked();
@@ -271,6 +282,8 @@ private slots:
       QVariantList getHarnessData(const QString &cableName);
 
       QVariantList getDiodeData(const QString &cableName);
+
+      QVariantList getRelayData(const QString &cableName);
 
       void on_pushButton_back_clicked();
 

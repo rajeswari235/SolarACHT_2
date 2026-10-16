@@ -129,7 +129,6 @@ public:
         const QVariantList &patchData,
         const QVariantList &diodeData);
 
-    //Diode Test
     QVector<QString> m_diodeCable;
     QVector<QString> m_diodeAnodeCon;
     QVector<QString> m_diodeAnodePin;
@@ -147,6 +146,28 @@ public:
                m_waitingForDiodePacketAck ||
                m_waitingForDiodeResults;
     }
+
+    //Relay Test
+
+
+    bool mapRelayToHardware(
+        const QVariantList &patchData,
+        const QVariantList &relayData);
+
+    QVector<QString> m_relayCable;
+
+    QVector<QString> m_relaySourceCon;
+    QVector<QString> m_relaySourcePin;
+
+    QVector<QString> m_relaySideCon;
+    QVector<QString> m_relaySideRSPins;
+
+    QVector<QString> m_relayDestCon;
+    QVector<QString> m_relayDestPin;
+
+    QVector<QString> m_relayExcitationVoltage;
+    QVector<QString> m_relayExp;
+
 
 private slots:
     void onReadyRead();

@@ -929,8 +929,329 @@ void TestController::startDiodeTransmission(
     emit executeWriteToNotes("Diode START packet sent");
     emit executeWriteToNotes(
         QString("Diode START HEX: %1")
-            .arg(QString(startPacket.toHex(' ').toUpper())));
+                .arg(QString(startPacket.toHex(' ').toUpper())));
 }
+
+
+bool TestController::mapRelayToHardware(
+    const QVariantList &patchData,
+    const QVariantList &relayData)
+{
+    if (!m_obj)
+        return false;
+
+    emit executeWriteToNotes("===========================================");
+    emit executeWriteToNotes("STEP-1: Relay Logical Connectors -> Hardware Pins");
+    emit executeWriteToNotes("===========================================");
+
+    // Clear previous Relay mappings.
+    m_relayCable.clear();
+    m_relaySourceCon.clear();
+    m_relaySourcePin.clear();
+    m_relaySideCon.clear();
+    m_relaySideRSPins.clear();
+    m_relayDestCon.clear();
+    m_relayDestPin.clear();
+    m_relayExcitationVoltage.clear();
+    m_relayExp.clear();
+
+    if (patchData.isEmpty() || relayData.isEmpty())
+    {
+        emit executeWriteToNotes(
+            "RELAY Mapping FAILED: Patch or Relay data is empty.");
+        return false;
+    }
+
+    // -------------------------------------------------
+    // Extract PATCH data
+    // -------------------------------------------------
+    QVector<QString> userCon;
+    QVector<QString> userPin;
+    QVector<QString> patchCon;
+    QVector<QString> patchPin;
+
+    for (const QVariant &v : patchData)
+    {
+        const QVariantMap m = v.toMap();
+
+        userCon.append(m["userCon"].toString().simplified());
+        userPin.append(m["userPin"].toString().simplified());
+        patchCon.append(m["patchCon"].toString().simplified());
+        patchPin.append(QString::number(m["patchPin"].toInt()));
+    }
+
+    emit executeWriteToNotes(
+        QString("Patch rows loaded: %1").arg(userCon.size()));
+
+    // -------------------------------------------------
+    // Extract RELAY data
+    // -------------------------------------------------
+    QVector<QString> cable;
+    QVector<QString> sourceCon;
+    QVector<QString> sourcePin;
+    QVector<QString> relaySideCon;
+    QVector<QString> relaySideRSPins;
+    QVector<QString> destCon;
+    QVector<QString> destPin;
+    QVector<QString> excitationVoltage;
+    QVector<QString> expected;
+
+    for (const QVariant &v : relayData)
+    {
+        const QVariantMap m = v.toMap();
+
+        cable.append(m["cable"].toString());
+        sourceCon.append(m["sourceCon"].toString().simplified());
+        sourcePin.append(m["sourcePin"].toString().simplified());
+
+        relaySideCon.append(
+            m["relaySideCon"].toString().simplified());
+
+        relaySideRSPins.append(
+            m["relaySideRSPins"].toString().simplified());
+
+        destCon.append(m["destCon"].toString().simplified());
+        destPin.append(m["destPin"].toString().simplified());
+
+        excitationVoltage.append(
+            m["excitationVoltage"].toString().simplified());
+
+        expected.append(m["exp"].toString().simplified());
+    }
+
+    emit executeWriteToNotes(
+        QString("Relay rows loaded: %1").arg(cable.size()));
+
+    // -------------------------------------------------
+    // Mapping process
+    // -------------------------------------------------
+    QString errorLog;
+    bool mappingOk = true;
+
+    for (int i = 0; i < cable.size(); ++i)
+    {
+        bool sourceFound = false;
+        bool destFound = false;
+
+        QString mappedSourceCon;
+        QString mappedSourcePin;
+        QString mappedDestCon;
+        QString mappedDestPin;
+
+        emit executeWriteToNotes("-------------------------------------------");
+        emit executeWriteToNotes(
+            QString("RELAY ROW %1 | Cable: %2").arg(i + 1).arg(cable[i]));
+
+        // -------------------------------------------------
+        // Map Source connector + pin to Patch hardware
+        // -------------------------------------------------
+        emit executeWriteToNotes(
+            QString("Finding SOURCE: %1 - %2")
+                .arg(sourceCon[i])
+                .arg(sourcePin[i]));
+
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (sourceCon[i] == userCon[j] &&
+                sourcePin[i] == userPin[j])
+            {
+                mappedSourceCon = patchCon[j];
+                mappedSourcePin = patchPin[j];
+                sourceFound = true;
+
+                emit executeWriteToNotes(
+                    QString("SOURCE MATCH: %1-%2 -> Hardware %3-%4")
+                        .arg(sourceCon[i])
+                        .arg(sourcePin[i])
+                        .arg(mappedSourceCon)
+                        .arg(mappedSourcePin));
+
+                break;
+            }
+        }
+
+        if (!sourceFound)
+        {
+            errorLog += QString(
+                "Row %1: SOURCE mapping missing for %2-%3\n")
+                .arg(i + 1)
+                .arg(sourceCon[i])
+                .arg(sourcePin[i]);
+
+            emit executeWriteToNotes(
+                QString("SOURCE NOT FOUND: %1-%2")
+                    .arg(sourceCon[i])
+                    .arg(sourcePin[i]));
+        }
+
+        // -------------------------------------------------
+        // Map Destination connector + pin to Patch hardware
+        // -------------------------------------------------
+        emit executeWriteToNotes(
+            QString("Finding DESTINATION: %1 - %2")
+                .arg(destCon[i])
+                .arg(destPin[i]));
+
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (destCon[i] == userCon[j] &&
+                destPin[i] == userPin[j])
+            {
+                mappedDestCon = patchCon[j];
+                mappedDestPin = patchPin[j];
+                destFound = true;
+
+                emit executeWriteToNotes(
+                    QString("DESTINATION MATCH: %1-%2 -> Hardware %3-%4")
+                        .arg(destCon[i])
+                        .arg(destPin[i])
+                        .arg(mappedDestCon)
+                        .arg(mappedDestPin));
+
+                break;
+            }
+        }
+
+        if (!destFound)
+        {
+            errorLog += QString(
+                "Row %1: DESTINATION mapping missing for %2-%3\n")
+                .arg(i + 1)
+                .arg(destCon[i])
+                .arg(destPin[i]);
+
+            emit executeWriteToNotes(
+                QString("DESTINATION NOT FOUND: %1-%2")
+                    .arg(destCon[i])
+                    .arg(destPin[i]));
+        }
+
+        // -------------------------------------------------
+        // Store aligned results only if both ends are mapped
+        // -------------------------------------------------
+        if (!sourceFound || !destFound)
+        {
+            mappingOk = false;
+            continue;
+        }
+
+        // -------------------------------------------------
+        // Validate coil connections: mapped ends must be TP31
+        // -------------------------------------------------
+        const QString rsPins = relaySideRSPins[i].trimmed().toUpper();
+
+        if (rsPins == "X1&X2" || rsPins == "Y1&Y2")
+        {
+            if (mappedSourceCon.compare("TP-31", Qt::CaseInsensitive) != 0 ||
+                mappedDestCon.compare("TP-31", Qt::CaseInsensitive) != 0)
+            {
+                emit executeWriteToNotes(
+                    QString("RELAY Mapping FAILED: Coil pins must connect "
+                            "to TP31 only. Relay Pins: %1, "
+                            "Mapped Source Connector: %2, "
+                            "Mapped Destination Connector: %3")
+                        .arg(rsPins, mappedSourceCon, mappedDestCon));
+
+                QMessageBox::warning(
+                    m_obj,
+                    "Relay Mapping Error",
+                    QString("Coil Pins Need To Connect TP31 connector only\n\n"
+                            "Relay Pins: %1\n"
+                            "Mapped Source Connector: %2\n"
+                            "Mapped Destination Connector: %3")
+                        .arg(rsPins, mappedSourceCon, mappedDestCon));
+
+                // Clear mappings collected from previous rows.
+                m_relayCable.clear();
+                m_relaySourceCon.clear();
+                m_relaySourcePin.clear();
+                m_relaySideCon.clear();
+                m_relaySideRSPins.clear();
+                m_relayDestCon.clear();
+                m_relayDestPin.clear();
+                m_relayExcitationVoltage.clear();
+                m_relayExp.clear();
+
+                return false;
+            }
+        }
+
+        m_relayCable.append(cable[i]);
+
+        m_relaySourceCon.append(mappedSourceCon);
+        m_relaySourcePin.append(mappedSourcePin);
+
+        // Relay-side values are metadata, not Patch endpoints.
+        m_relaySideCon.append(relaySideCon[i]);
+        m_relaySideRSPins.append(relaySideRSPins[i]);
+
+        m_relayDestCon.append(mappedDestCon);
+        m_relayDestPin.append(mappedDestPin);
+
+        m_relayExcitationVoltage.append(excitationVoltage[i]);
+        m_relayExp.append(expected[i]);
+
+        emit executeWriteToNotes(
+            QString("RELAY SIDE: %1 | Pins: %2 | Excitation: %3 | Expected: %4")
+                .arg(relaySideCon[i])
+                .arg(relaySideRSPins[i])
+                .arg(excitationVoltage[i].isEmpty()
+                         ? QString("N/A")
+                         : excitationVoltage[i])
+                .arg(expected[i]));
+    }
+
+    // -------------------------------------------------
+    // Handle mapping failure
+    // -------------------------------------------------
+    if (!mappingOk)
+    {
+        emit executeWriteToNotes("RELAY Mapping FAILED");
+        emit executeWriteToNotes(errorLog);
+
+        m_relayCable.clear();
+        m_relaySourceCon.clear();
+        m_relaySourcePin.clear();
+        m_relaySideCon.clear();
+        m_relaySideRSPins.clear();
+        m_relayDestCon.clear();
+        m_relayDestPin.clear();
+        m_relayExcitationVoltage.clear();
+        m_relayExp.clear();
+
+        return false;
+    }
+
+    // -------------------------------------------------
+    // Log successful mappings
+    // -------------------------------------------------
+    emit executeWriteToNotes(
+        QString("RELAY Mapping SUCCESS | Total Connections: %1")
+            .arg(m_relayCable.size()));
+
+    for (int i = 0; i < m_relayCable.size(); ++i)
+    {
+        emit executeWriteToNotes(
+            QString("RELAY MAP %1: SOURCE %2-%3 -> DESTINATION %4-%5 | "
+                    "Relay: %6 | Pins: %7 | Excitation: %8 | Expected: %9")
+                .arg(i + 1)
+                .arg(m_relaySourceCon[i])
+                .arg(m_relaySourcePin[i])
+                .arg(m_relayDestCon[i])
+                .arg(m_relayDestPin[i])
+                .arg(m_relaySideCon[i])
+                .arg(m_relaySideRSPins[i])
+                .arg(m_relayExcitationVoltage[i].isEmpty()
+                         ? QString("N/A")
+                         : m_relayExcitationVoltage[i])
+                .arg(m_relayExp[i]));
+    }
+
+    emit executeWriteToNotes("RELAY MAPPING COMPLETED SUCCESSFULLY");
+
+    return true;
+}
+
 
 void TestController::onReadyRead()
 {
