@@ -177,6 +177,12 @@ public:
          const QVector<QString>& excitationVoltage,
          const QVector<QString>& expected);
 
+     QByteArray constructRelayStartPacket(
+         quint8 totalRelays,
+         quint16 totalPackets);
+
+     void populateRelayTestTable(const QVariantList &relayData);
+
 private slots:
      void on_pushButton_Save_clicked();
 
@@ -341,6 +347,15 @@ private slots:
 
       void on_pushButton_openDiodeTest_clicked();
 
+
+      void on_pushButton_stopRelayTest_clicked();
+
+      void on_pushButton_saveRelayTest_clicked();
+
+      void on_pushButton_openRelayTest_clicked();
+
+      void on_pushButton_backFromRelayTest_clicked();
+
 public slots:
 
       void portStatus(const QString &data);
@@ -389,6 +404,14 @@ public slots:
        void onInsulationResultsCompleted();
 
        void onInsulationNetMarkerReceived(int loomNo, int totalNets);
+
+       // Relay Test
+       void onRelayResultReceived(int row, float measuredValue);
+       void onRelayResultsCompleted();
+
+       bool checkRelayExpected(
+              float measuredOhms,
+              const QString &expected);
 
 
 private:
@@ -441,6 +464,10 @@ private:
 
     //Diode Test table filling
     QStandardItemModel *m_diodeTestModel = nullptr;
+
+    //Relay Test table filling
+    QStandardItemModel *m_relayTestModel = nullptr;
+    QVector<float> m_relayMeasuredValues;
 
 };
 

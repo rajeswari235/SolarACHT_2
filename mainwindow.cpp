@@ -283,6 +283,16 @@ MainWindow::MainWindow(QWidget *parent)
             "Diode test completed successfully.");
     });
 
+    //Relay Test Slots
+    connect(test,
+            &TestController::relayResultReceived,
+            this,
+            &MainWindow::onRelayResultReceived);
+
+    connect(test,
+            &TestController::relayResultsCompleted,
+            this,
+            &MainWindow::onRelayResultsCompleted);
 
 }
 MainWindow::~MainWindow()
@@ -4247,6 +4257,322 @@ void MainWindow::onInsulationNetMarkerReceived(
              << ui->progressBar_InsuIsoTest->value();
 }
 
+void MainWindow::onRelayResultReceived(
+    int row, float measuredValue)
+{
+    if (!m_relayTestModel ||
+        row < 0 ||
+        row >= m_relayTestModel->rowCount())
+    {
+        return;
+    }
+
+    // =====================================================
+    // 1. Store raw measured value
+    // =====================================================
+
+    if (row >= m_relayMeasuredValues.size())
+        return;
+
+    m_relayMeasuredValues[row] = measuredValue;
+
+    // =====================================================
+    // 2. Update Measured Value column
+    // Column 11 = Measured Value
+    // =====================================================
+
+    m_relayTestModel->setData(
+        m_relayTestModel->index(row, 11),
+        QString::number(measuredValue, 'f', 3));
+
+    // =====================================================
+    // 3. Select current row
+    // =====================================================
+
+    ui->tableView_relay->selectRow(row);
+
+    // =====================================================
+    // 4. Scroll to current row
+    // =====================================================
+
+    ui->tableView_relay->scrollTo(
+        m_relayTestModel->index(row, 0),
+        QAbstractItemView::PositionAtBottom);
+
+    // =====================================================
+    // 5. Update progress bar
+    // =====================================================
+
+    ui->progressBar_RelayTest->setValue(row + 1);
+
+    qDebug() << "Relay Live Result:"
+             << "Row:" << row + 1
+             << "Value:" << measuredValue;
+}
+
+void MainWindow::onRelayResultsCompleted()
+{
+    if (!m_relayTestModel)
+        return;
+
+    const int rowCount = m_relayTestModel->rowCount();
+
+    const int resultCount =
+        qMin(m_relayMeasuredValues.size(), rowCount);
+
+    // =====================================================
+    // Process all Relay results
+    // =====================================================
+
+    for (int row = 0; row < resultCount; ++row)
+    {
+        const float measuredOhms =
+            m_relayMeasuredValues[row];
+
+        // =================================================
+        // 1. Convert measured value to readable format
+        // =================================================
+
+        QString measuredText;
+
+        if (qAbs(measuredOhms) >= 1000000000.0)
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms / 1000000000.0,
+                    'f', 3) + "GΩ";
+        }
+        else if (qAbs(measuredOhms) >= 1000000.0)
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms / 1000000.0,
+                    'f', 3) + "MΩ";
+        }
+        else if (qAbs(measuredOhms) >= 1000.0)
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms / 1000.0,
+                    'f', 3) + "KΩ";
+        }
+        else
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms,
+                    'f', 3) + "Ω";
+        }
+
+        // =================================================
+        // 2. Update Measured Value
+        // Column 11
+        // =================================================
+
+        m_relayTestModel->setData(
+            m_relayTestModel->index(row, 11),
+            measuredText);
+
+        // =================================================
+        // 3. Get Expected Value
+        // Column 9
+        // =================================================
+
+        const QString expected =
+            m_relayTestModel->index(row, 9)
+                .data().toString().trimmed();
+
+        // =================================================
+        // 4. Compare measured against expected
+        // =================================================
+
+        const bool pass =
+            checkRelayExpected(measuredOhms, expected);
+
+        // =================================================
+        // 5. Update PASS / FAIL
+        // Column 12
+        // =================================================
+
+        const QModelIndex resultIndex =
+            m_relayTestModel->index(row, 12);
+
+        m_relayTestModel->setData(
+            resultIndex,
+            pass ? "PASS" : "FAIL");
+
+        // =================================================
+        // 6. Light green / light red background
+        // =================================================
+
+        const QColor resultColor =
+            pass ? QColor(200, 245, 200)
+                 : QColor(255, 205, 205);
+
+        m_relayTestModel->setData(
+            resultIndex,
+            QBrush(resultColor),
+            Qt::BackgroundRole);
+
+        // =================================================
+        // 7. Remarks
+        // Column 13
+        // =================================================
+
+        m_relayTestModel->setData(
+            m_relayTestModel->index(row, 13),
+            pass ? "Within expected range"
+                 : "Measured value out of range");
+
+        writeToNotes(
+            QString("Relay Result %1 | Measured: %2 | "
+                    "Expected: %3 | %4")
+                .arg(row + 1)
+                .arg(measuredText)
+                .arg(expected)
+                .arg(pass ? "PASS" : "FAIL"));
+    }
+
+    // =====================================================
+    // 8. Return table to top
+    // =====================================================
+
+    ui->tableView_relay->clearSelection();
+
+    ui->tableView_relay->scrollTo(
+        m_relayTestModel->index(0, 0),
+        QAbstractItemView::PositionAtTop);
+
+    // =====================================================
+    // 9. Completion popup
+    // =====================================================
+
+    writeToNotes(
+        QString("Relay comparison completed. Results: %1")
+            .arg(resultCount));
+
+    QMessageBox::information(
+        this,
+        "Relay Test",
+                "Relay Test Completed Successfully.");
+}
+
+bool MainWindow::checkRelayExpected(
+    float measuredOhms,
+    const QString &expected)
+{
+    const QString value = expected.trimmed();
+
+    // Convert a resistance number with optional K/M/G
+    // and optional Ω into ohms.
+    auto parseOhms = [](const QString &text,
+                         double &ohms) -> bool
+    {
+        static const QRegularExpression numberRegex(
+            R"(^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMG]?)\s*Ω?\s*$)",
+            QRegularExpression::CaseInsensitiveOption);
+
+        const QRegularExpressionMatch match =
+            numberRegex.match(text);
+
+        if (!match.hasMatch())
+            return false;
+
+        ohms = match.captured(1).toDouble();
+
+        const QString unit =
+            match.captured(2).toUpper();
+
+        if (unit == "K")
+            ohms *= 1000.0;
+        else if (unit == "M")
+            ohms *= 1000000.0;
+        else if (unit == "G")
+            ohms *= 1000000000.0;
+
+        return true;
+    };
+
+    // =====================================================
+    // 1. Less than / Greater than
+    // Examples: <2, >10K, <2Ω, >10MΩ
+    // =====================================================
+
+    if (value.startsWith('<') ||
+        value.startsWith('>'))
+    {
+        double limit = 0.0;
+
+        if (!parseOhms(value.mid(1), limit))
+            return false;
+
+        if (value.startsWith('<'))
+            return measuredOhms < limit;
+
+        return measuredOhms > limit;
+    }
+
+    // =====================================================
+    // 2. Tolerance format
+    // Examples: 20K ± 3, 20KΩ ± 3KΩ
+    // =====================================================
+
+    if (value.contains(QChar(0x00B1)))
+    {
+        const QStringList parts =
+            value.split(QChar(0x00B1));
+
+        if (parts.size() != 2)
+            return false;
+
+        double nominal = 0.0;
+        double tolerance = 0.0;
+
+        if (!parseOhms(parts[0], nominal) ||
+            !parseOhms(parts[1], tolerance))
+        {
+            return false;
+        }
+
+        return measuredOhms >= nominal - tolerance &&
+               measuredOhms <= nominal + tolerance;
+    }
+
+    // =====================================================
+    // 3. Min-Max range format
+    // Examples: 400-600, 1K-2K, 400Ω-600Ω
+    // =====================================================
+
+    if (value.contains('-'))
+    {
+        const QStringList parts = value.split('-');
+
+        if (parts.size() != 2)
+            return false;
+
+        double minimum = 0.0;
+        double maximum = 0.0;
+
+        if (!parseOhms(parts[0], minimum) ||
+            !parseOhms(parts[1], maximum))
+        {
+            return false;
+        }
+
+        if (minimum > maximum)
+            return false;
+
+        return measuredOhms >= minimum &&
+               measuredOhms <= maximum;
+    }
+
+    // =====================================================
+    // 4. Invalid / unsupported expected format
+    // =====================================================
+
+    return false;
+}
+
 void MainWindow::populateInsulationTable(
     const QVector<InsulationTableNet> &nets,
     const QVariantList &patchData)
@@ -6048,6 +6374,207 @@ QVector<QByteArray> MainWindow::constructUARTPacketsForRelay(
     return packets;
 }
 
+
+QByteArray MainWindow::constructRelayStartPacket(
+    quint8 totalRelays,
+    quint16 totalPackets)
+{
+    QByteArray packet;
+
+    packet.append(char(0x53));
+    packet.append(char(0x4B));
+    packet.append(char(0x3A));
+
+    // Number of relays (uint8)
+    packet.append(char(totalRelays));
+
+    // Total packet count (uint16, MSB first)
+    packet.append(char((totalPackets >> 8) & 0xFF));
+    packet.append(char(totalPackets & 0xFF));
+
+    // XOR checksum of all preceding bytes
+    quint8 checksum = 0;
+
+    for (char c : packet)
+        checksum ^= static_cast<quint8>(c);
+
+    packet.append(char(checksum));
+
+    writeToNotes(
+        QString("Relay start packet: %1")
+            .arg(QString(packet.toHex(' ').toUpper())));
+
+    return packet;
+}
+
+
+void MainWindow::populateRelayTestTable(
+    const QVariantList &relayData)
+{
+    if (!m_relayTestModel)
+    {
+        m_relayTestModel = new QStandardItemModel(this);
+    }
+
+    m_relayTestModel->clear();
+
+    m_relayTestModel->setColumnCount(14);
+
+    m_relayTestModel->setHorizontalHeaderLabels({
+        "S.No",
+        "Cable",
+        "Source Connector",
+        "Source Pin",
+        "Relay Connector",
+        "Relay Pins",
+        "Destination Connector",
+        "Destination Pin",
+        "Excitation Voltage",
+        "Expected",
+        "Condition",
+        "Measured Value",
+        "Results",
+        "Remarks"
+    });
+
+    // Attach the model to the Relay table.
+    ui->tableView_relay->setModel(m_relayTestModel);
+
+    // Keep columns readable; allow horizontal scrolling.
+    ui->tableView_relay->horizontalHeader()
+        ->setSectionResizeMode(QHeaderView::Interactive);
+
+    ui->tableView_relay->setHorizontalScrollMode(
+        QAbstractItemView::ScrollPerPixel);
+
+    // Set practical initial column widths.
+    const int columnWidths[] = {
+        55, 100, 240, 85, 260, 100, 240,
+        100, 130, 100, 100, 130, 100, 180
+    };
+
+    for (int col = 0; col < 14; ++col)
+    {
+        ui->tableView_relay->setColumnWidth(
+            col, columnWidths[col]);
+    }
+
+    int serialNumber = 1;
+    int start = 0;
+
+    // Database rows are already ordered by Relay group.
+    while (start < relayData.size())
+    {
+        const QVariantMap firstMap =
+            relayData[start].toMap();
+
+        const QString relayName =
+            firstMap["relaySideCon"].toString().simplified();
+
+        // Find the end of this contiguous Relay group.
+        int end = start + 1;
+
+        while (end < relayData.size())
+        {
+            const QString nextRelay =
+                relayData[end].toMap()["relaySideCon"]
+                    .toString().simplified();
+
+            if (nextRelay != relayName)
+                break;
+
+            ++end;
+        }
+
+        // Add every database row for OFF, then every row for ON.
+        const QString conditions[] = {"OFF", "ON"};
+
+        for (const QString &condition : conditions)
+        {
+            for (int i = start; i < end; ++i)
+            {
+                const QVariantMap m =
+                    relayData[i].toMap();
+
+                // Determine whether this is a coil row
+                const QString relayPins =
+                    m["relaySideRSPins"].toString().simplified();
+
+                const bool isCoil =
+                    relayPins.compare("X1&X2", Qt::CaseInsensitive) == 0 ||
+                    relayPins.compare("Y1&Y2", Qt::CaseInsensitive) == 0;
+
+                // Set expected value according to Relay condition
+                QString expectedValue = m["exp"].toString();
+
+                if (!isCoil)
+                {
+                    if (condition == "OFF")
+                        expectedValue = "<2";
+                    else if (condition == "ON")
+                        expectedValue = ">2";
+                }
+
+                QStringList values = {
+                    QString::number(serialNumber++),
+                    m["cable"].toString(),
+                    m["sourceCon"].toString(),
+                    m["sourcePin"].toString(),
+                    m["relaySideCon"].toString(),
+                    m["relaySideRSPins"].toString(),
+                    m["destCon"].toString(),
+                    m["destPin"].toString(),
+                    m["excitationVoltage"].toString(),
+                    expectedValue,
+                    condition,
+                    "",     // Measured Value
+                    "",     // Results
+                    ""      // Remarks
+                };
+
+                QList<QStandardItem *> rowItems;
+
+                for (const QString &value : values)
+                {
+                    QStandardItem *item =
+                        new QStandardItem(value);
+
+                    item->setEditable(false);
+                    rowItems.append(item);
+                }
+
+                m_relayTestModel->appendRow(rowItems);
+            }
+        }
+
+        start = end;
+    }
+
+    // Row selection and readable display.
+    ui->tableView_relay->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+
+    // Single-row selection
+    ui->tableView_relay->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+
+    // Disable editing
+    ui->tableView_relay->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+
+    ui->tableView_relay->setAlternatingRowColors(true);
+    ui->tableView_relay->verticalHeader()
+        ->setSectionResizeMode(QHeaderView::ResizeToContents);
+
+    writeToNotes(
+        QString("Relay table populated: %1 database rows, "
+                "%2 display rows.")
+            .arg(relayData.size())
+            .arg(m_relayTestModel->rowCount()));
+}
+
+
+
 void MainWindow::onPortSelected(const QString &portName)
 {
     test->setPORTNAME(portName);
@@ -6281,6 +6808,73 @@ void MainWindow::on_pushButton_run_clicked()
         }
 
         writeToNotes("========== END OF RELAY PACKETS ==========");
+
+        // Count distinct Relay IDs (Relay_1, Relay_2, Relay_3, etc.)
+        QSet<QString> relayIds;
+
+        for (const QString &relayName : test->m_relaySideCon)
+        {
+            QRegularExpression re(
+                R"(^Relay_([1-9][0-9]*)(?:\s+.*)?$)",
+                QRegularExpression::CaseInsensitiveOption);
+
+            const QRegularExpressionMatch match =
+                re.match(relayName.trimmed());
+
+            if (match.hasMatch())
+                relayIds.insert(match.captured(1));
+        }
+
+        const quint8 totalRelays =
+            static_cast<quint8>(relayIds.size());
+
+        QByteArray startPacket =
+            constructRelayStartPacket(
+                totalRelays,
+                static_cast<quint16>(relayPackets.size()));
+
+
+        // -----------------------------------------
+        // Table Filling and Reset State
+        // -----------------------------------------
+
+        // Populate Relay result table FIRST.
+        populateRelayTestTable(relay);
+
+        m_relayMeasuredValues.clear();
+        m_relayMeasuredValues.resize(m_relayTestModel->rowCount());
+
+        // -----------------------------------------
+        // Get expected result count
+        // -----------------------------------------
+
+        int expectedRelayResults =
+            m_relayTestModel->rowCount();
+
+        // -----------------------------------------
+        // Reset progress bar
+        // -----------------------------------------
+
+        ui->progressBar_RelayTest->setValue(0);
+
+        ui->progressBar_RelayTest->setMaximum(
+            expectedRelayResults);
+
+        // -----------------------------------------
+        // Move to Relay test page
+        // -----------------------------------------
+
+        ui->stackedWidget->setCurrentWidget(
+            ui->page_relayTest);
+
+        ui->label_test_Relay->setText("Relay Test");
+
+        test->setRelayExpectedResults(m_relayTestModel->rowCount());
+        // ------------------------------------
+        // Send Start Packet and begin ACK flow
+        // ------------------------------------
+        test->startRelayTransmission(startPacket, relayPackets);
+
     }
     // -------------------------------------------------
     // Relay Test BLOCK End
@@ -8260,4 +8854,63 @@ void MainWindow::on_pushButton_openDiodeTest_clicked()
     }
 
     // Add Open Files functionality here
+}
+
+
+void MainWindow::on_pushButton_stopRelayTest_clicked()
+{
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Relay Test",
+                "Are you sure you want to abort the Relay test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
+}
+
+void MainWindow::on_pushButton_saveRelayTest_clicked()
+{
+    if (test->isRelayTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Relay Test",
+            "Please wait, Relay test is running.");
+        return;
+    }
+
+    // Add Save functionality here
+}
+
+void MainWindow::on_pushButton_openRelayTest_clicked()
+{
+    if (test->isRelayTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Relay Test",
+            "Please wait, Relay test is running.");
+        return;
+    }
+
+    // Add Open Files functionality here
+}
+
+void MainWindow::on_pushButton_backFromRelayTest_clicked()
+{
+    if (test->isRelayTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Relay Test",
+            "Please wait, Relay test is running.");
+        return;
+    }
+
+    ui->stackedWidget->setCurrentWidget(ui->page_test);
 }

@@ -743,6 +743,20 @@ void TestController::abortCommand()
     resultsOfSelfTestBytes.clear();
     m_twoWireResults.clear();
 
+    // Stop Relay
+    m_waitingForRelayStartAck = false;
+    m_waitingForRelayPacketAck = false;
+    m_waitingForRelayResults = false;
+
+    // Reset Relay packet state
+    m_currentRelayPacket = 0;
+    m_relayPackets.clear();
+
+    // Reset Relay result state
+    m_relayResultsReceived = 0;
+    m_relayResultIndex = 0;
+    m_relayResultBuffer.clear();
+
     // Stop Diode
     m_waitingForDiodeStartAck = false;
     m_waitingForDiodePacketAck = false;
@@ -1252,6 +1266,37 @@ bool TestController::mapRelayToHardware(
     return true;
 }
 
+void TestController::startRelayTransmission(
+    const QByteArray &startPacket,
+    const QVector<QByteArray> &packets)
+{
+    if (!serial || !serial->isOpen() || packets.isEmpty())
+    {
+        emit executeWriteToNotes(
+            "Relay transmission failed: Serial closed or no packets.");
+        return;
+    }
+
+    m_relayPackets = packets;
+    m_currentRelayPacket = 0;
+
+    m_relayResultBuffer.clear();
+    m_relayResultIndex = 0;
+
+    m_waitingForRelayStartAck = true;
+    m_waitingForRelayPacketAck = false;
+    m_waitingForRelayResults = false;
+
+    m_relayResultsReceived = 0;
+
+    serial->write(startPacket);
+
+    emit executeWriteToNotes("Relay START packet sent");
+    emit executeWriteToNotes(
+        QString("Relay START HEX: %1")
+            .arg(QString(startPacket.toHex(' ').toUpper())));
+}
+
 
 void TestController::onReadyRead()
 {
@@ -1627,6 +1672,84 @@ void TestController::onReadyRead()
         return;
     }
 
+    // =====================================================
+    // RELAY RESULT RECEPTION
+    // =====================================================
+
+    if (m_waitingForRelayResults)
+    {
+        const QByteArray endMarker = "ABCDE";
+
+        // Number of results expected from the Relay test
+        const int expectedResults = m_relayExpectedResults;
+
+        // --------------------------------------------------------
+        // Receive results
+        // --------------------------------------------------------
+        while (m_relayResultIndex < expectedResults &&
+               buffer.size() >= 4)
+        {
+            QByteArray floatBytes = buffer.left(4);
+
+            quint32 bits =
+                    (quint32(quint8(floatBytes[0])) << 24) |
+                    (quint32(quint8(floatBytes[1])) << 16) |
+                    (quint32(quint8(floatBytes[2])) << 8) |
+                     quint32(quint8(floatBytes[3]));
+
+            float value = 0.0f;
+
+            memcpy(&value,
+                   &bits,
+                   sizeof(float));
+
+            buffer.remove(0, 4);
+
+            int resultIndex = m_relayResultIndex++;
+
+            qDebug() << "Relay Result:"
+                     << resultIndex + 1
+                     << value;
+
+            emit executeWriteToNotes(
+                QString("Relay Result %1 : %2")
+                    .arg(resultIndex + 1)
+                    .arg(value));
+
+            // LIVE TABLE UPDATE
+            emit relayResultReceived(
+                resultIndex,
+                value);
+        }
+
+        // --------------------------------------------------------
+        // All expected results received.
+        // Now wait for ABCDE.
+        // --------------------------------------------------------
+        if (m_relayResultIndex == expectedResults)
+        {
+            int endIndex = buffer.indexOf(endMarker);
+
+            if (endIndex >= 0)
+            {
+                buffer.remove(
+                    0,
+                    endIndex + endMarker.size());
+
+                m_waitingForRelayResults = false;
+
+                emit executeWriteToNotes(
+                    "Relay Result Transmission Completed");
+
+                qDebug()
+                    << "ABCDE received - Relay result reception complete";
+
+                emit relayResultsCompleted();
+            }
+        }
+
+        return;
+    }
 
 
     // =====================================================
@@ -1983,6 +2106,42 @@ void TestController::onReadyRead()
                 continue;
             }
 
+
+            // =================================================
+            // ACK for RELAY START packet
+            // =================================================
+            if (m_waitingForRelayStartAck)
+            {
+                m_waitingForRelayStartAck = false;
+                m_currentRelayPacket = 0;
+
+                emit executeWriteToNotes(
+                    "Relay START ACK received");
+
+                if (!m_relayPackets.isEmpty())
+                {
+                    serial->write(m_relayPackets[0]);
+
+                    emit executeWriteToNotes(
+                        "Relay TX Packet 1");
+
+                    emit executeWriteToNotes(
+                        QString(m_relayPackets[0]
+                                    .toHex(' ').toUpper()));
+
+                    m_waitingForRelayPacketAck = true;
+                }
+                else
+                {
+                    emit executeWriteToNotes(
+                        "Relay transmission failed: No data packets.");
+
+                    m_waitingForRelayResults = false;
+                }
+
+                continue;
+            }
+
             // =================================================
             // ACK for TWO WIRE DATA Packet
             // =================================================
@@ -2121,6 +2280,50 @@ void TestController::onReadyRead()
 
                 continue;
             }
+
+
+            // =================================================
+            // ACK for RELAY DATA packet
+            // =================================================
+            if (m_waitingForRelayPacketAck)
+            {
+                m_currentRelayPacket++;
+
+                if (m_currentRelayPacket < m_relayPackets.size())
+                {
+                    // Send the next packet after receiving ACK.
+                    serial->write(
+                        m_relayPackets[m_currentRelayPacket]);
+
+                    emit executeWriteToNotes(
+                        QString("Relay TX Packet %1")
+                            .arg(m_currentRelayPacket + 1));
+
+                    emit executeWriteToNotes(
+                        QString(
+                            m_relayPackets[m_currentRelayPacket]
+                                .toHex(' ').toUpper()));
+                }
+                else
+                {
+                    // All Relay packets acknowledged.
+                    m_waitingForRelayPacketAck = false;
+                    m_waitingForRelayResults = true;
+
+                    emit executeWriteToNotes(
+                        "Relay Transmission Completed");
+
+                    emit executeWriteToNotes(
+                        "Waiting for Relay results...");
+
+                    qDebug()
+                        << "Relay transmission complete;"
+                        << "waiting for results.";
+                }
+
+                continue;
+            }
+
         }
         else
         {
@@ -2132,4 +2335,6 @@ void TestController::onReadyRead()
             buffer.remove(0, 1);
         }
     }
+    //Ack While loop End
 }
+//Ready Read End
