@@ -4048,6 +4048,7 @@ void MainWindow::on_pushButton_run_clicked()
         QMessageBox::information(this,"Port not connected","Please connect to hardware before running test");
         return;
     }
+    testCalibration=false;
 
     if(ui->comboBox_files->currentIndex()==0||ui->lineEdit_inspectedBy->text()==""
             ||ui->lineEdit_setNo->text()==""||ui->lineEdit_performedBy->text()==""
@@ -5030,6 +5031,7 @@ void MainWindow::on_pushButton_calibrationRun_clicked()
                "Calibration test is already running.");
            return;
        }
+    testCalibration=true;
 
     // Clear Calibration Value column
     for (int row = 0;
@@ -5427,10 +5429,10 @@ void MainWindow::generateCalibratePDF()
     printer.setOrientation(QPrinter::Portrait);
 
     printer.setPageMargins(
-                15, 15, 15, 25,
+                15, 15, 15, 20,
                 QPrinter::Millimeter);
 
-    printer.setResolution(72);
+    printer.setResolution(96);
 
     // Start painting
     QPainter painter;
@@ -5518,9 +5520,9 @@ void MainWindow::drawCalibrateTable(
     };
 
     // Fonts
-    QFont normalFont("Times New Roman", 10);
+    QFont normalFont("Times New Roman", 11);
 
-    QFont boldFont("Times New Roman", 10);
+    QFont boldFont("Times New Roman", 11);
     boldFont.setBold(true);
 
     // Draw a table cell
@@ -6221,6 +6223,8 @@ void MainWindow::generateInsoIsoPDF()
             QStandardPaths::writableLocation(
                 QStandardPaths::DesktopLocation);
 
+    QString testType=ui->comboBox_test->currentIndex()==2?"Isolation":"Insulation";
+
     QString folderPath = desktopPath + "/InsoIso_Pdf";
 
     QDir dir;
@@ -6234,7 +6238,7 @@ void MainWindow::generateInsoIsoPDF()
             .toString("yyyyMMdd_HHmmss");
 
     QString fileName = folderPath +
-            "/InsoIso_" + timestamp + ".pdf";
+            "/"+testType+"_" + timestamp + ".pdf";
 
     if (fileName.isEmpty())
         return;
@@ -6251,10 +6255,10 @@ void MainWindow::generateInsoIsoPDF()
     printer.setOrientation(QPrinter::Portrait);
 
     printer.setPageMargins(
-                15, 15, 15, 25,
+                15, 15, 15, 20,
                 QPrinter::Millimeter);
 
-    printer.setResolution(72);
+    printer.setResolution(96);
 
     // Start painting
     QPainter painter;
@@ -6362,9 +6366,9 @@ void MainWindow::drawInsoIsoTable(
     };
 
     // Fonts
-    QFont normalFont("Times New Roman", 10);
+    QFont normalFont("Times New Roman", 11);
 
-    QFont boldFont("Times New Roman", 10);
+    QFont boldFont("Times New Roman", 11);
     boldFont.setBold(true);
 
     // Draw a table cell
@@ -6584,11 +6588,11 @@ qreal MainWindow::drawTwoWireTestHeader(
     QImage solarLogo(":/new/prefix1/images/solar1.png");
     QImage drdoLogo(":/new/prefix1/images/drdo.png");
 
-    const qreal logoWidth = 95;
-    const qreal logoHeight = 55;
+    const qreal logoWidth = 105;
+    const qreal logoHeight = 75;
 
-    QFont normalFont("Times New Roman", 10);
-    QFont boldFont("Times New Roman", 10);
+    QFont normalFont("Times New Roman", 11);
+    QFont boldFont("Times New Roman", 11);
     boldFont.setBold(true);
 
     QFont titleFont("Times New Roman", 14);
@@ -6610,50 +6614,56 @@ qreal MainWindow::drawTwoWireTestHeader(
     painter.setFont(companyFont);
 
     painter.drawText(
-        QRectF(logoWidth,20, pageWidth - 2 * logoWidth, 25),
-        Qt::AlignCenter | Qt::TextWordWrap,
+        QRectF(logoWidth,45, pageWidth - 2 * logoWidth, 25),
+      Qt::AlignCenter,
         "SOLAR DEFENCE AND AEROSPACE LIMITED");
 
     painter.setFont(titleFont);
 
     painter.drawText(
-        QRectF(0, 40, pageWidth, 30),
-        Qt::AlignCenter | Qt::TextWordWrap,
+        QRectF(0,85, pageWidth, 30),
+        Qt::AlignCenter,
         "GNC KIT CABLE HARNESS TEST REPORT");
 
-    qreal y = 115;
+    qreal y = 155;
 
     painter.setFont(normalFont);
+
+
+    QString testType=testCalibration?"Calibration":ui->comboBox_test->currentText();
 
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Date : " +
                      QDate::currentDate().toString("dd-MM-yyyy"));
-    y += 18;
+    y += 20;
 
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Time : " +
                      QTime::currentTime().toString("hh:mm:ss AP"));
-    y += 18;
+    y += 20;
+    painter.drawText(QRectF(0, y, pageWidth, 14),
+                     Qt::AlignLeft,
+                     "Test Type : " +
+                    testType);
+    y += 20;
+    if(!testCalibration)
+    {
 
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Set No : " + ui->lineEdit_setNo->text());
-    y += 18;
+    y += 20;
 
-    painter.drawText(QRectF(0, y, pageWidth, 14),
-                     Qt::AlignLeft,
-                     "Test Type : " +
-                     ui->comboBox_test->currentText());
-    y += 18;
+
 
     QString result = (failedPinsCount == 0) ? "Pass" : "Fail";
 
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Final Result : " + result);
-    y += 18;
+    y += 20;
 
     painter.setFont(boldFont);
 
@@ -6662,6 +6672,7 @@ qreal MainWindow::drawTwoWireTestHeader(
                      Qt::AlignLeft,
                      "Total Failed Pins : " +
                      QString::number(failedPinsCount));
+    }
 
     return y + 40;
 }
@@ -6706,10 +6717,10 @@ void MainWindow::generateTwoWireTestPDF()
     printer.setOrientation(QPrinter::Portrait);
 
     printer.setPageMargins(
-                15, 15, 15, 25,
+                15, 15, 15, 20,
                 QPrinter::Millimeter);
 
-    printer.setResolution(72);
+    printer.setResolution(96);
 
     // Start painting
     QPainter painter;
@@ -6817,9 +6828,9 @@ void MainWindow::drawTwoWireTestTable(
     };
 
     // Fonts
-    QFont normalFont("Times New Roman", 10);
+    QFont normalFont("Times New Roman", 11);
 
-    QFont boldFont("Times New Roman", 10);
+    QFont boldFont("Times New Roman", 11);
     boldFont.setBold(true);
 
     // Draw a table cell
@@ -7016,8 +7027,8 @@ void MainWindow::drawTwoWireTestFooter(
 
     QString notes = ui->lineEdit_notes->text();
 
-    QFont normalFont("Times New Roman", 10);
-    QFont boldFont("Times New Roman", 10);
+    QFont normalFont("Times New Roman", 11);
+    QFont boldFont("Times New Roman", 11);
     boldFont.setBold(true);
 
     qreal left = 20;
@@ -7119,6 +7130,10 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
     printer.setOutputFileName(fileName);
     printer.setPageSize(QPageSize(QPageSize::A4));
     printer.setPageOrientation(QPageLayout::Portrait);
+
+    printer.setPageMargins(
+                12, 12, 12, 20,
+                QPrinter::Millimeter);
     printer.setResolution(96);
 
     QPainter painter;
@@ -7144,7 +7159,10 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
     QFont titleFont("Times New Roman", 14, QFont::Bold);
     QFont normalFont("Times New Roman", 11);
     QFont companyFont("Times New Roman", 16, QFont::Bold);
-    QFont pageFont("Times New Roman", 9);
+   // QFont pageFont("Times New Roman", 9);
+
+    QFont boldFont("Times New Roman", 11);
+    boldFont.setBold(true);
 
     QStringList values = {
         ui->textEdit_1->toPlainText(),
@@ -7190,24 +7208,24 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
 
     painter.setFont(companyFont);
     painter.drawText(
-                QRectF(logoWidth, 30,
+                QRectF(logoWidth+5, 50,
                        pageWidth - 2 * logoWidth, 25),
                 Qt::AlignCenter,
                 "SOLAR DEFENCE AND AEROSPACE LIMITED");
 
     painter.setFont(titleFont);
     painter.drawText(
-                QRectF(0, 65, pageWidth, 30),
+                QRectF(0, 85, pageWidth, 30),
                 Qt::AlignCenter,
                 "GNC KIT CABLE HARNESS TEST REPORT");
 
     painter.drawText(
-                QRectF(left, 100,
+                QRectF(left,115,
                        pageWidth - left - right, 30),
                 Qt::AlignCenter,
                 "SELF TEST REPORT");
 
-    qreal y = 160;
+    qreal y = 180;
 
     int pageNumber = 1;
 
@@ -7215,7 +7233,8 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
     auto drawPageNumber = [&]()
     {
         painter.save();
-        painter.setFont(pageFont);
+
+        painter.setFont(boldFont);
         painter.setPen(Qt::black);
 
         painter.drawText(
@@ -7233,9 +7252,9 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
         painter.save();
         painter.setPen(QPen(Qt::black, 1));
 
-        qreal borderLeft = 30;
-        qreal borderRight = pageWidth - 30;
-        qreal borderTop = firstPage ? 160- 10 : 30;
+        qreal borderLeft = 12;
+        qreal borderRight = pageWidth - 12;
+        qreal borderTop = firstPage ? 160- 10 : 12;
         qreal borderBottom = pageHeight - 40;
 
         painter.drawRect(
@@ -7312,19 +7331,30 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
         );
         painter.restore();
 
-        // Separator between separate QTextEdit entries
-        painter.setPen(QPen(Qt::lightGray, 0.5));
-        painter.drawLine(
-            QPointF(x, columnY[column] + rowHeight),
-            QPointF(x + columnWidth, columnY[column] + rowHeight)
-        );
+//        // Separator between separate QTextEdit entries
+//        painter.setPen(QPen(Qt::lightGray, 0.5));
+//        painter.drawLine(
+//            QPointF(x, columnY[column] + rowHeight),
+//            QPointF(x + columnWidth, columnY[column] + rowHeight)
+//        );
 
         columnY[column] += rowHeight + 5;
 }
 
     // Draw border and page number on the final page
     drawPageBorder(pageNumber == 1);
-    drawPageNumber();
+    //drawPageNumber();
+    qDebug()<<"lastly y value is"<<columnY[0];
+    const qreal bottom = pageHeight - 25;
+
+    drawTwoWireTestFooter(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                columnY[0],
+                pageNumber);
 
     painter.end();
 

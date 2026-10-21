@@ -417,6 +417,7 @@ private:
     int failedPinsCount = 0;
     int failedPinsInso= 0;
     int failedPinsCalibrate=0;
+    bool testCalibration=false;
 
 
 
