@@ -684,7 +684,6 @@ void TestController::sendInsulationStartPacket(
     m_insulationResults.clear();
 
     m_currentInsulationLoom = 0;
-    m_currentInsulationLoomData.clear();
 
     m_insulationNetMarkersSeen = 0;
 
@@ -738,16 +737,566 @@ void TestController::abortCommand()
 
     // Reset loom state
     m_currentInsulationLoom = 0;
-    m_currentInsulationLoomData.clear();
 
     // Clear received data
     buffer.clear();
     resultsOfSelfTestBytes.clear();
     m_twoWireResults.clear();
 
+    // Stop Relay
+    m_waitingForRelayStartAck = false;
+    m_waitingForRelayPacketAck = false;
+    m_waitingForRelayResults = false;
+
+    // Reset Relay packet state
+    m_currentRelayPacket = 0;
+    m_relayPackets.clear();
+
+    // Reset Relay result state
+    m_relayResultsReceived = 0;
+    m_relayResultIndex = 0;
+    m_relayResultBuffer.clear();
+
+    // Stop Diode
+    m_waitingForDiodeStartAck = false;
+    m_waitingForDiodePacketAck = false;
+    m_waitingForDiodeResults = false;
+
+    // Reset Diode packet state
+    m_currentDiodePacket = 0;
+    m_diodePackets.clear();
+
+    // Reset Diode result state
+    m_diodeResultsReceived = 0;
+
     emit executeWriteToNotes(
                 "Test Aborted");
 }
+
+bool TestController::mapDiodeToHardware(
+    const QVariantList &patchData,
+    const QVariantList &diodeData)
+{
+    if (!m_obj)
+        return false;
+
+    emit executeWriteToNotes("===========================================");
+    emit executeWriteToNotes("STEP-1: Diode Logical Connectors -> Hardware Pins");
+    emit executeWriteToNotes("===========================================");
+
+    // Clear previous Diode mappings
+    m_diodeCable.clear();
+    m_diodeAnodeCon.clear();
+    m_diodeAnodePin.clear();
+    m_diodeCathodeCon.clear();
+    m_diodeCathodePin.clear();
+    m_diodeExpVoltage.clear();
+
+    // -------- Extract PATCH data --------
+    QVector<QString> userCon, userPin, patchCon, patchPin;
+
+    for (const QVariant &v : patchData)
+    {
+        QVariantMap m = v.toMap();
+
+        userCon.append(m["userCon"].toString().simplified());
+        userPin.append(m["userPin"].toString().simplified());
+        patchCon.append(m["patchCon"].toString().simplified());
+        patchPin.append(QString::number(m["patchPin"].toInt()));
+    }
+
+    emit executeWriteToNotes(
+        QString("Patch rows loaded : %1").arg(userCon.size()));
+
+    // -------- Extract DIODE data --------
+    QVector<QString> cable, anodeCon, anodePin;
+    QVector<QString> cathodeCon, cathodePin, expVoltage;
+
+    for (const QVariant &v : diodeData)
+    {
+        QVariantMap m = v.toMap();
+
+        cable.append(m["cable"].toString());
+        anodeCon.append(m["anodeCon"].toString().simplified());
+        anodePin.append(m["anodePin"].toString().simplified());
+        cathodeCon.append(m["cathodeCon"].toString().simplified());
+        cathodePin.append(m["cathodePin"].toString().simplified());
+        expVoltage.append(m["expVoltage"].toString());
+    }
+
+    emit executeWriteToNotes(
+        QString("Diode rows loaded : %1").arg(anodeCon.size()));
+
+    // -------- Mapping process --------
+    bool mappingOk = true;
+    QString errorLog;
+
+    for (int i = 0; i < anodeCon.size(); ++i)
+    {
+        bool anodeFound = false;
+        bool cathodeFound = false;
+
+        // -------- Anode mapping --------
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (anodeCon[i] == userCon[j] &&
+                anodePin[i] == userPin[j])
+            {
+                m_diodeAnodeCon.append(patchCon[j]);
+                m_diodeAnodePin.append(patchPin[j]);
+                anodeFound = true;
+                break;
+            }
+        }
+
+        // -------- Cathode mapping --------
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (cathodeCon[i] == userCon[j] &&
+                cathodePin[i] == userPin[j])
+            {
+                m_diodeCathodeCon.append(patchCon[j]);
+                m_diodeCathodePin.append(patchPin[j]);
+                cathodeFound = true;
+                break;
+            }
+        }
+
+        if (!anodeFound || !cathodeFound)
+        {
+            mappingOk = false;
+
+            errorLog += QString(
+                "Row %1 mapping missing | ANODE(%2:%3) CATHODE(%4:%5)\n")
+                .arg(i + 1)
+                .arg(anodeCon[i])
+                .arg(anodePin[i])
+                .arg(cathodeCon[i])
+                .arg(cathodePin[i]);
+        }
+
+        m_diodeCable.append(cable[i]);
+        m_diodeExpVoltage.append(expVoltage[i]);
+    }
+
+    // -------- Validation result --------
+    if (!mappingOk)
+    {
+        emit executeWriteToNotes("Diode Mapping FAILED");
+        emit executeWriteToNotes(errorLog);
+
+        // Clear partial results after failure
+        m_diodeCable.clear();
+        m_diodeAnodeCon.clear();
+        m_diodeAnodePin.clear();
+        m_diodeCathodeCon.clear();
+        m_diodeCathodePin.clear();
+        m_diodeExpVoltage.clear();
+
+        return false;
+    }
+
+    // -------- Log successful mappings --------
+    emit executeWriteToNotes(
+        QString("Diode Mapping SUCCESS | Total Connections: %1")
+            .arg(m_diodeAnodeCon.size()));
+
+    for (int i = 0; i < m_diodeAnodeCon.size(); ++i)
+    {
+        emit executeWriteToNotes(
+            QString("DIODE MAP %1 : ANODE %2-%3 -> CATHODE %4-%5 | Expected: %6")
+                .arg(i + 1)
+                .arg(m_diodeAnodeCon[i])
+                .arg(m_diodeAnodePin[i])
+                .arg(m_diodeCathodeCon[i])
+                .arg(m_diodeCathodePin[i])
+                .arg(m_diodeExpVoltage[i]));
+    }
+
+    emit executeWriteToNotes("DIODE MAPPING COMPLETED SUCCESSFULLY");
+
+    return true;
+}
+
+void TestController::startDiodeTransmission(
+    const QByteArray &startPacket,
+    const QVector<QByteArray> &packets)
+{
+    if (!serial || !serial->isOpen() || packets.isEmpty())
+    {
+        emit executeWriteToNotes(
+            "Diode transmission failed: Serial closed or no packets.");
+        return;
+    }
+
+    m_diodePackets = packets;
+    m_currentDiodePacket = 0;
+
+    m_waitingForDiodeStartAck = true;
+    m_waitingForDiodePacketAck = false;
+    m_waitingForDiodeResults = false;
+
+    m_diodeResultsReceived = 0;
+
+    serial->write(startPacket);
+
+    emit executeWriteToNotes("Diode START packet sent");
+    emit executeWriteToNotes(
+        QString("Diode START HEX: %1")
+                .arg(QString(startPacket.toHex(' ').toUpper())));
+}
+
+
+bool TestController::mapRelayToHardware(
+    const QVariantList &patchData,
+    const QVariantList &relayData)
+{
+    if (!m_obj)
+        return false;
+
+    emit executeWriteToNotes("===========================================");
+    emit executeWriteToNotes("STEP-1: Relay Logical Connectors -> Hardware Pins");
+    emit executeWriteToNotes("===========================================");
+
+    // Clear previous Relay mappings.
+    m_relayCable.clear();
+    m_relaySourceCon.clear();
+    m_relaySourcePin.clear();
+    m_relaySideCon.clear();
+    m_relaySideRSPins.clear();
+    m_relayDestCon.clear();
+    m_relayDestPin.clear();
+    m_relayExcitationVoltage.clear();
+    m_relayExp.clear();
+
+    if (patchData.isEmpty() || relayData.isEmpty())
+    {
+        emit executeWriteToNotes(
+            "RELAY Mapping FAILED: Patch or Relay data is empty.");
+        return false;
+    }
+
+    // -------------------------------------------------
+    // Extract PATCH data
+    // -------------------------------------------------
+    QVector<QString> userCon;
+    QVector<QString> userPin;
+    QVector<QString> patchCon;
+    QVector<QString> patchPin;
+
+    for (const QVariant &v : patchData)
+    {
+        const QVariantMap m = v.toMap();
+
+        userCon.append(m["userCon"].toString().simplified());
+        userPin.append(m["userPin"].toString().simplified());
+        patchCon.append(m["patchCon"].toString().simplified());
+        patchPin.append(QString::number(m["patchPin"].toInt()));
+    }
+
+    emit executeWriteToNotes(
+        QString("Patch rows loaded: %1").arg(userCon.size()));
+
+    // -------------------------------------------------
+    // Extract RELAY data
+    // -------------------------------------------------
+    QVector<QString> cable;
+    QVector<QString> sourceCon;
+    QVector<QString> sourcePin;
+    QVector<QString> relaySideCon;
+    QVector<QString> relaySideRSPins;
+    QVector<QString> destCon;
+    QVector<QString> destPin;
+    QVector<QString> excitationVoltage;
+    QVector<QString> expected;
+
+    for (const QVariant &v : relayData)
+    {
+        const QVariantMap m = v.toMap();
+
+        cable.append(m["cable"].toString());
+        sourceCon.append(m["sourceCon"].toString().simplified());
+        sourcePin.append(m["sourcePin"].toString().simplified());
+
+        relaySideCon.append(
+            m["relaySideCon"].toString().simplified());
+
+        relaySideRSPins.append(
+            m["relaySideRSPins"].toString().simplified());
+
+        destCon.append(m["destCon"].toString().simplified());
+        destPin.append(m["destPin"].toString().simplified());
+
+        excitationVoltage.append(
+            m["excitationVoltage"].toString().simplified());
+
+        expected.append(m["exp"].toString().simplified());
+    }
+
+    emit executeWriteToNotes(
+        QString("Relay rows loaded: %1").arg(cable.size()));
+
+    // -------------------------------------------------
+    // Mapping process
+    // -------------------------------------------------
+    QString errorLog;
+    bool mappingOk = true;
+
+    for (int i = 0; i < cable.size(); ++i)
+    {
+        bool sourceFound = false;
+        bool destFound = false;
+
+        QString mappedSourceCon;
+        QString mappedSourcePin;
+        QString mappedDestCon;
+        QString mappedDestPin;
+
+        emit executeWriteToNotes("-------------------------------------------");
+        emit executeWriteToNotes(
+            QString("RELAY ROW %1 | Cable: %2").arg(i + 1).arg(cable[i]));
+
+        // -------------------------------------------------
+        // Map Source connector + pin to Patch hardware
+        // -------------------------------------------------
+        emit executeWriteToNotes(
+            QString("Finding SOURCE: %1 - %2")
+                .arg(sourceCon[i])
+                .arg(sourcePin[i]));
+
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (sourceCon[i] == userCon[j] &&
+                sourcePin[i] == userPin[j])
+            {
+                mappedSourceCon = patchCon[j];
+                mappedSourcePin = patchPin[j];
+                sourceFound = true;
+
+                emit executeWriteToNotes(
+                    QString("SOURCE MATCH: %1-%2 -> Hardware %3-%4")
+                        .arg(sourceCon[i])
+                        .arg(sourcePin[i])
+                        .arg(mappedSourceCon)
+                        .arg(mappedSourcePin));
+
+                break;
+            }
+        }
+
+        if (!sourceFound)
+        {
+            errorLog += QString(
+                "Row %1: SOURCE mapping missing for %2-%3\n")
+                .arg(i + 1)
+                .arg(sourceCon[i])
+                .arg(sourcePin[i]);
+
+            emit executeWriteToNotes(
+                QString("SOURCE NOT FOUND: %1-%2")
+                    .arg(sourceCon[i])
+                    .arg(sourcePin[i]));
+        }
+
+        // -------------------------------------------------
+        // Map Destination connector + pin to Patch hardware
+        // -------------------------------------------------
+        emit executeWriteToNotes(
+            QString("Finding DESTINATION: %1 - %2")
+                .arg(destCon[i])
+                .arg(destPin[i]));
+
+        for (int j = 0; j < userCon.size(); ++j)
+        {
+            if (destCon[i] == userCon[j] &&
+                destPin[i] == userPin[j])
+            {
+                mappedDestCon = patchCon[j];
+                mappedDestPin = patchPin[j];
+                destFound = true;
+
+                emit executeWriteToNotes(
+                    QString("DESTINATION MATCH: %1-%2 -> Hardware %3-%4")
+                        .arg(destCon[i])
+                        .arg(destPin[i])
+                        .arg(mappedDestCon)
+                        .arg(mappedDestPin));
+
+                break;
+            }
+        }
+
+        if (!destFound)
+        {
+            errorLog += QString(
+                "Row %1: DESTINATION mapping missing for %2-%3\n")
+                .arg(i + 1)
+                .arg(destCon[i])
+                .arg(destPin[i]);
+
+            emit executeWriteToNotes(
+                QString("DESTINATION NOT FOUND: %1-%2")
+                    .arg(destCon[i])
+                    .arg(destPin[i]));
+        }
+
+        // -------------------------------------------------
+        // Store aligned results only if both ends are mapped
+        // -------------------------------------------------
+        if (!sourceFound || !destFound)
+        {
+            mappingOk = false;
+            continue;
+        }
+
+        // -------------------------------------------------
+        // Validate coil connections: mapped ends must be TP31
+        // -------------------------------------------------
+        const QString rsPins = relaySideRSPins[i].trimmed().toUpper();
+
+        if (rsPins == "X1&X2" || rsPins == "Y1&Y2")
+        {
+            if (mappedSourceCon.compare("TP-31", Qt::CaseInsensitive) != 0 ||
+                mappedDestCon.compare("TP-31", Qt::CaseInsensitive) != 0)
+            {
+                emit executeWriteToNotes(
+                    QString("RELAY Mapping FAILED: Coil pins must connect "
+                            "to TP31 only. Relay Pins: %1, "
+                            "Mapped Source Connector: %2, "
+                            "Mapped Destination Connector: %3")
+                        .arg(rsPins, mappedSourceCon, mappedDestCon));
+
+                QMessageBox::warning(
+                    m_obj,
+                    "Relay Mapping Error",
+                    QString("Coil Pins Need To Connect TP31 connector only\n\n"
+                            "Relay Pins: %1\n"
+                            "Mapped Source Connector: %2\n"
+                            "Mapped Destination Connector: %3")
+                        .arg(rsPins, mappedSourceCon, mappedDestCon));
+
+                // Clear mappings collected from previous rows.
+                m_relayCable.clear();
+                m_relaySourceCon.clear();
+                m_relaySourcePin.clear();
+                m_relaySideCon.clear();
+                m_relaySideRSPins.clear();
+                m_relayDestCon.clear();
+                m_relayDestPin.clear();
+                m_relayExcitationVoltage.clear();
+                m_relayExp.clear();
+
+                return false;
+            }
+        }
+
+        m_relayCable.append(cable[i]);
+
+        m_relaySourceCon.append(mappedSourceCon);
+        m_relaySourcePin.append(mappedSourcePin);
+
+        // Relay-side values are metadata, not Patch endpoints.
+        m_relaySideCon.append(relaySideCon[i]);
+        m_relaySideRSPins.append(relaySideRSPins[i]);
+
+        m_relayDestCon.append(mappedDestCon);
+        m_relayDestPin.append(mappedDestPin);
+
+        m_relayExcitationVoltage.append(excitationVoltage[i]);
+        m_relayExp.append(expected[i]);
+
+        emit executeWriteToNotes(
+            QString("RELAY SIDE: %1 | Pins: %2 | Excitation: %3 | Expected: %4")
+                .arg(relaySideCon[i])
+                .arg(relaySideRSPins[i])
+                .arg(excitationVoltage[i].isEmpty()
+                         ? QString("N/A")
+                         : excitationVoltage[i])
+                .arg(expected[i]));
+    }
+
+    // -------------------------------------------------
+    // Handle mapping failure
+    // -------------------------------------------------
+    if (!mappingOk)
+    {
+        emit executeWriteToNotes("RELAY Mapping FAILED");
+        emit executeWriteToNotes(errorLog);
+
+        m_relayCable.clear();
+        m_relaySourceCon.clear();
+        m_relaySourcePin.clear();
+        m_relaySideCon.clear();
+        m_relaySideRSPins.clear();
+        m_relayDestCon.clear();
+        m_relayDestPin.clear();
+        m_relayExcitationVoltage.clear();
+        m_relayExp.clear();
+
+        return false;
+    }
+
+    // -------------------------------------------------
+    // Log successful mappings
+    // -------------------------------------------------
+    emit executeWriteToNotes(
+        QString("RELAY Mapping SUCCESS | Total Connections: %1")
+            .arg(m_relayCable.size()));
+
+    for (int i = 0; i < m_relayCable.size(); ++i)
+    {
+        emit executeWriteToNotes(
+            QString("RELAY MAP %1: SOURCE %2-%3 -> DESTINATION %4-%5 | "
+                    "Relay: %6 | Pins: %7 | Excitation: %8 | Expected: %9")
+                .arg(i + 1)
+                .arg(m_relaySourceCon[i])
+                .arg(m_relaySourcePin[i])
+                .arg(m_relayDestCon[i])
+                .arg(m_relayDestPin[i])
+                .arg(m_relaySideCon[i])
+                .arg(m_relaySideRSPins[i])
+                .arg(m_relayExcitationVoltage[i].isEmpty()
+                         ? QString("N/A")
+                         : m_relayExcitationVoltage[i])
+                .arg(m_relayExp[i]));
+    }
+
+    emit executeWriteToNotes("RELAY MAPPING COMPLETED SUCCESSFULLY");
+
+    return true;
+}
+
+void TestController::startRelayTransmission(
+    const QByteArray &startPacket,
+    const QVector<QByteArray> &packets)
+{
+    if (!serial || !serial->isOpen() || packets.isEmpty())
+    {
+        emit executeWriteToNotes(
+            "Relay transmission failed: Serial closed or no packets.");
+        return;
+    }
+
+    m_relayPackets = packets;
+    m_currentRelayPacket = 0;
+
+    m_relayResultBuffer.clear();
+    m_relayResultIndex = 0;
+
+    m_waitingForRelayStartAck = true;
+    m_waitingForRelayPacketAck = false;
+    m_waitingForRelayResults = false;
+
+    m_relayResultsReceived = 0;
+
+    serial->write(startPacket);
+
+    emit executeWriteToNotes("Relay START packet sent");
+    emit executeWriteToNotes(
+        QString("Relay START HEX: %1")
+            .arg(QString(startPacket.toHex(' ').toUpper())));
+}
+
 
 void TestController::onReadyRead()
 {
@@ -1124,173 +1673,342 @@ void TestController::onReadyRead()
     }
 
     // =====================================================
+    // RELAY RESULT RECEPTION
+    // =====================================================
+
+    if (m_waitingForRelayResults)
+    {
+        const QByteArray endMarker = "ABCDE";
+
+        // Number of results expected from the Relay test
+        const int expectedResults = m_relayExpectedResults;
+
+        // --------------------------------------------------------
+        // Receive results
+        // --------------------------------------------------------
+        while (m_relayResultIndex < expectedResults &&
+               buffer.size() >= 4)
+        {
+            QByteArray floatBytes = buffer.left(4);
+
+            quint32 bits =
+                    (quint32(quint8(floatBytes[0])) << 24) |
+                    (quint32(quint8(floatBytes[1])) << 16) |
+                    (quint32(quint8(floatBytes[2])) << 8) |
+                     quint32(quint8(floatBytes[3]));
+
+            float value = 0.0f;
+
+            memcpy(&value,
+                   &bits,
+                   sizeof(float));
+
+            buffer.remove(0, 4);
+
+            int resultIndex = m_relayResultIndex++;
+
+            qDebug() << "Relay Result:"
+                     << resultIndex + 1
+                     << value;
+
+            emit executeWriteToNotes(
+                QString("Relay Result %1 : %2")
+                    .arg(resultIndex + 1)
+                    .arg(value));
+
+            // LIVE TABLE UPDATE
+            emit relayResultReceived(
+                resultIndex,
+                value);
+        }
+
+        // --------------------------------------------------------
+        // All expected results received.
+        // Now wait for ABCDE.
+        // --------------------------------------------------------
+        if (m_relayResultIndex == expectedResults)
+        {
+            int endIndex = buffer.indexOf(endMarker);
+
+            if (endIndex >= 0)
+            {
+                buffer.remove(
+                    0,
+                    endIndex + endMarker.size());
+
+                m_waitingForRelayResults = false;
+
+                emit executeWriteToNotes(
+                    "Relay Result Transmission Completed");
+
+                qDebug()
+                    << "ABCDE received - Relay result reception complete";
+
+                emit relayResultsCompleted();
+            }
+        }
+
+        return;
+    }
+
+
+    // =====================================================
+    // DIODE RESULT RECEPTION
+    // =====================================================
+
+    if (m_waitingForDiodeResults)
+    {
+        const QByteArray endMarker = "ABCDE";
+
+        // Check whether the test terminator has arrived.
+        int endIndex = buffer.indexOf(endMarker);
+
+        // Process only bytes preceding the terminator.
+        int dataEnd = (endIndex >= 0)
+                          ? endIndex
+                          : buffer.size();
+
+        // Every Diode result is exactly 6 ASCII bytes.
+        while (dataEnd >= 6)
+        {
+            QByteArray resultBytes = buffer.left(6);
+
+            QString rawResult =
+                QString::fromLatin1(resultBytes);
+
+            QString result;
+
+            if (rawResult == "PASS_C")
+                result = "PASS";
+            else if (rawResult == "PASS_R")
+                result = "REVERSE";
+            else if (rawResult == "FAIL_S")
+                result = "SHORT";
+            else if (rawResult == "FAIL_O")
+                result = "OPEN";
+            else if (rawResult == "FAIL_F")
+                result = "FAIL";
+            else
+            {
+                // Do not silently interpret unknown data
+                qDebug() << "Unknown Diode result:"
+                         << resultBytes.toHex(' ').toUpper();
+
+                emit executeWriteToNotes(
+                    QString("Unknown Diode result: %1")
+                        .arg(QString(
+                            resultBytes.toHex(' ').toUpper())));
+
+                // Discard this six-byte result field.
+                buffer.remove(0, 6);
+                dataEnd -= 6;
+                continue;
+            }
+
+            const int row = m_diodeResultsReceived++;
+
+            qDebug() << "Diode Result:"
+                     << row + 1 << result;
+
+            emit executeWriteToNotes(
+                QString("Diode Result %1: %2")
+                    .arg(row + 1)
+                    .arg(result));
+
+            emit diodeResultReceived(row, result);
+
+            buffer.remove(0, 6);
+            dataEnd -= 6;
+        }
+
+        // If the complete terminator has arrived, finish the test.
+        // Any incomplete result before it remains unprocessed above.
+        if (endIndex >= 0)
+        {
+            if (!buffer.left(endMarker.size()).startsWith(endMarker))
+            {
+                // Defensive check; normally the marker starts at byte 0
+                // after all complete results have been consumed.
+                return;
+            }
+
+            buffer.remove(0, endMarker.size());
+
+            m_waitingForDiodeResults = false;
+
+            qDebug() << "ABCDE received - Diode test completed";
+
+            emit executeWriteToNotes(
+                "Diode Result Transmission Completed");
+
+            emit diodeResultsCompleted();
+
+            return;
+        }
+
+        // Keep any incomplete result bytes for the next readyRead().
+        return;
+    }
+
+    // =====================================================
     // INSULATION/ISOLATION RESULT RECEPTION
     // =====================================================
 
     if (m_receivingInsulationResults)
     {
-        // Count 2F 2F markers in the current loom data
         const QByteArray netMarker = QByteArray::fromHex("2F2F");
         const QByteArray loomEndMarker = QByteArray::fromHex("FF00");
+        const QByteArray failedMarker = QByteArray::fromHex("2E2E");
+        const QByteArray endMarker = "ABCDE";
 
-        int loomEndIndex = buffer.indexOf(loomEndMarker);
-
-        QByteArray currentLoomData =
-            (loomEndIndex >= 0)
-                ? buffer.left(loomEndIndex)
-                : buffer;
-
-        int markerCount = 0;
-        int pos = 0;
-
-        while ((pos = currentLoomData.indexOf(netMarker, pos)) >= 0)
+        // Process every complete loom already in the buffer.
+        while (true)
         {
-            markerCount++;
-            pos += netMarker.size();  // Skip both bytes of this marker
-        }
+            int loomEndIndex = buffer.indexOf(loomEndMarker);
+            int testEndIndex = buffer.indexOf(endMarker);
 
-        qDebug() << "Loom data bytes:" << currentLoomData.size()
-                 << "Marker pairs:" << markerCount
-                 << "Expected nets:"
-                 << m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0);
+            // Count markers only in the current loom's data.
+            // Do not count bytes belonging to the final terminator.
+            int dataEndIndex = buffer.size();
 
-        while (m_insulationNetMarkersSeen < markerCount &&
-               m_insulationNetMarkersSeen <
-                   m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0))
-        {
-            m_insulationNetMarkersSeen++;
+            if (loomEndIndex >= 0)
+                dataEndIndex = loomEndIndex;
+
+            if (testEndIndex >= 0 &&
+                testEndIndex < dataEndIndex)
+            {
+                dataEndIndex = testEndIndex;
+            }
+
+            QByteArray currentLoomData = buffer.left(dataEndIndex);
+
+            int markerCount = 0;
+            int pos = 0;
+
+            while ((pos = currentLoomData.indexOf(netMarker, pos)) >= 0)
+            {
+                markerCount++;
+                pos += netMarker.size();
+            }
 
             int totalNets =
                 m_insulationNetsPerLoom.value(m_currentInsulationLoom, 0);
 
-            qDebug() << "Loom:" << m_currentInsulationLoom + 1
-                     << "Net marker:" << m_insulationNetMarkersSeen
-                     << "Total nets:" << totalNets;
+            qDebug() << "Loom data bytes:" << currentLoomData.size()
+                     << "Marker pairs:" << markerCount
+                     << "Expected nets:" << totalNets;
 
-            emit insulationNetMarkerReceived(
-                m_currentInsulationLoom + 1,
-                totalNets);
-        }
+            while (m_insulationNetMarkersSeen < markerCount &&
+                   m_insulationNetMarkersSeen < totalNets)
+            {
+                m_insulationNetMarkersSeen++;
 
-        // --------------------------------------------------------
-        // FINAL TEST TERMINATOR
-        // --------------------------------------------------------
+                qDebug() << "Loom:" << m_currentInsulationLoom + 1
+                         << "Net marker:" << m_insulationNetMarkersSeen
+                         << "Total nets:" << totalNets;
 
-        const QByteArray endMarker = "ABCDE";
+                emit insulationNetMarkerReceived(
+                    m_currentInsulationLoom + 1,
+                    totalNets);
+            }
 
-        int testEndIndex =
-                buffer.indexOf(endMarker);
+            // --------------------------------------------------------
+            // Process a complete loom BEFORE completing the test.
+            // --------------------------------------------------------
 
-        if(testEndIndex >= 0)
-        {
-            buffer.remove(
-                        0,
-                        testEndIndex + endMarker.size());
+            if (loomEndIndex >= 0 &&
+                (testEndIndex < 0 || loomEndIndex < testEndIndex))
+            {
+                QByteArray loomData = buffer.left(loomEndIndex);
 
-            m_receivingInsulationResults = false;
+                // Remove loom data + FF 00.
+                buffer.remove(
+                    0,
+                    loomEndIndex + loomEndMarker.size());
 
-            qDebug()
-                    << "ABCDE received - "
-                       " test completed";
+                bool loomFailed = loomData.contains(failedMarker);
 
-            emit executeWriteToNotes(
-                        " Test Completed");
+                if (!loomFailed)
+                {
+                    qDebug() << "Insulation Loom"
+                             << m_currentInsulationLoom + 1
+                             << "PASS";
 
-            emit insulationResultsCompleted();
+                    emit executeWriteToNotes(
+                        QString("Insulation Loom %1 : PASS")
+                        .arg(m_currentInsulationLoom + 1));
 
+                    emit insulationLoomPassed(
+                        m_currentInsulationLoom + 1);
+                }
+                else
+                {
+                    qDebug() << "Insulation Loom"
+                             << m_currentInsulationLoom + 1
+                             << "FAIL";
+
+                    emit executeWriteToNotes(
+                        QString("Insulation Loom %1 : FAIL")
+                        .arg(m_currentInsulationLoom + 1));
+
+                    emit insulationLoomFailed(
+                        m_currentInsulationLoom + 1,
+                        loomData);
+                }
+
+                qDebug() << "INSULATION LOOM:"
+                         << m_currentInsulationLoom + 1;
+
+                qDebug() << "LOOM DATA:"
+                         << loomData.toHex(' ').toUpper();
+
+                qDebug() << "LOOM DATA SIZE:"
+                         << loomData.size() << "Bytes";
+
+                emit executeWriteToNotes(
+                    QString("Insulation Loom %1 Result: %2")
+                    .arg(m_currentInsulationLoom + 1)
+                    .arg(QString::fromLatin1(
+                        loomData.toHex(' ').toUpper())));
+
+                emit executeWriteToNotes(
+                    QString("Insulation Loom %1 Result Size: %2 Bytes")
+                    .arg(m_currentInsulationLoom + 1)
+                    .arg(loomData.size()));
+
+                // Move to next loom.
+                m_currentInsulationLoom++;
+                m_insulationNetMarkersSeen = 0;
+
+                // Process any other complete loom already buffered.
+                continue;
+            }
+
+            // --------------------------------------------------------
+            // FINAL TEST TERMINATOR
+            // --------------------------------------------------------
+
+            if (testEndIndex >= 0)
+            {
+                buffer.remove(
+                    0,
+                    testEndIndex + endMarker.size());
+
+                m_receivingInsulationResults = false;
+
+                qDebug() << "ABCDE received - test completed";
+
+                emit executeWriteToNotes("Test Completed");
+                emit insulationResultsCompleted();
+
+                return;
+            }
+
+            // No complete loom or final terminator is available yet.
             return;
         }
-
-        // --------------------------------------------------------
-        // ONE LOOM TERMINATOR
-        // --------------------------------------------------------
-
-        if (loomEndIndex < 0)
-        {
-            // Complete loom has not arrived yet.
-            return;
-        }
-
-        // --------------------------------------------------------
-        // One complete loom received
-        // --------------------------------------------------------
-
-        QByteArray loomData =
-                buffer.left(loomEndIndex);
-
-        // Remove loom data + FF 00
-        buffer.remove(
-            0,
-            loomEndIndex + loomEndMarker.size());
-
-        m_currentInsulationLoomData = loomData;
-
-        QByteArray failedMarker =
-                QByteArray::fromHex("2E2E");
-
-        bool loomFailed =
-                loomData.contains(failedMarker);
-
-        if(!loomFailed)
-        {
-            qDebug()
-                << "Insulation Loom"
-                << m_currentInsulationLoom + 1
-                << "PASS";
-
-            emit executeWriteToNotes(
-                QString("Insulation Loom %1 : PASS")
-                .arg(m_currentInsulationLoom + 1));
-
-            emit insulationLoomPassed(
-                m_currentInsulationLoom + 1);
-        }
-        else
-        {
-            qDebug()
-                << "Insulation Loom"
-                << m_currentInsulationLoom + 1
-                << "FAIL";
-
-            emit executeWriteToNotes(
-                QString("Insulation Loom %1 : FAIL")
-                .arg(m_currentInsulationLoom + 1));
-
-            emit insulationLoomFailed(
-                m_currentInsulationLoom + 1,
-                loomData);
-        }
-
-        qDebug()
-                << "INSULATION LOOM:"
-                << m_currentInsulationLoom + 1;
-
-        qDebug()
-                << "LOOM DATA:"
-                << loomData.toHex(' ').toUpper();
-
-        qDebug()
-                << "LOOM DATA SIZE:"
-                << loomData.size()
-                << "Bytes";
-
-        emit executeWriteToNotes(
-            QString("Insulation Loom %1 Result: %2")
-            .arg(m_currentInsulationLoom + 1)
-            .arg(QString::fromLatin1(
-                loomData.toHex(' ').toUpper())));
-
-        emit executeWriteToNotes(
-            QString("Insulation Loom %1 Result Size: %2 Bytes")
-            .arg(m_currentInsulationLoom + 1)
-            .arg(loomData.size()));
-
-        // Move to next loom
-        m_currentInsulationLoom++;
-        m_insulationNetMarkersSeen = 0;
-
-        return;
     }
+
 
 
 
@@ -1361,6 +2079,64 @@ void TestController::onReadyRead()
                             .toUpper());
 
                     m_waitingForInsulationPacketAck = true;
+                }
+
+                continue;
+            }
+
+            // =================================================
+            // ACK for DIODE START packet
+            // =================================================
+            if (m_waitingForDiodeStartAck)
+            {
+                m_waitingForDiodeStartAck = false;
+                m_currentDiodePacket = 0;
+
+                if (!m_diodePackets.isEmpty())
+                {
+                    serial->write(m_diodePackets[0]);
+
+                    emit executeWriteToNotes("Diode TX Packet 1");
+                    emit executeWriteToNotes(
+                        QString(m_diodePackets[0].toHex(' ').toUpper()));
+
+                    m_waitingForDiodePacketAck = true;
+                }
+
+                continue;
+            }
+
+
+            // =================================================
+            // ACK for RELAY START packet
+            // =================================================
+            if (m_waitingForRelayStartAck)
+            {
+                m_waitingForRelayStartAck = false;
+                m_currentRelayPacket = 0;
+
+                emit executeWriteToNotes(
+                    "Relay START ACK received");
+
+                if (!m_relayPackets.isEmpty())
+                {
+                    serial->write(m_relayPackets[0]);
+
+                    emit executeWriteToNotes(
+                        "Relay TX Packet 1");
+
+                    emit executeWriteToNotes(
+                        QString(m_relayPackets[0]
+                                    .toHex(' ').toUpper()));
+
+                    m_waitingForRelayPacketAck = true;
+                }
+                else
+                {
+                    emit executeWriteToNotes(
+                        "Relay transmission failed: No data packets.");
+
+                    m_waitingForRelayResults = false;
                 }
 
                 continue;
@@ -1465,6 +2241,89 @@ void TestController::onReadyRead()
 
                 continue;
             }
+
+            // =================================================
+            // ACK for DIODE DATA packet
+            // =================================================
+            if (m_waitingForDiodePacketAck)
+            {
+                m_currentDiodePacket++;
+
+                if (m_currentDiodePacket < m_diodePackets.size())
+                {
+                    // Send the next packet only after receiving ACK
+                    serial->write(m_diodePackets[m_currentDiodePacket]);
+
+                    emit executeWriteToNotes(
+                        QString("Diode TX Packet %1")
+                            .arg(m_currentDiodePacket + 1));
+
+                    emit executeWriteToNotes(
+                        QString(m_diodePackets[m_currentDiodePacket]
+                                    .toHex(' ').toUpper()));
+                }
+                else
+                {
+                    // All Diode packets acknowledged
+                    m_waitingForDiodePacketAck = false;
+                    m_waitingForDiodeResults = true;
+
+                    emit executeWriteToNotes(
+                        "Diode Transmission Completed");
+
+                    emit executeWriteToNotes(
+                        "Waiting for Diode results...");
+
+                    qDebug() << "Diode transmission complete;"
+                                " waiting for results.";
+                }
+
+                continue;
+            }
+
+
+            // =================================================
+            // ACK for RELAY DATA packet
+            // =================================================
+            if (m_waitingForRelayPacketAck)
+            {
+                m_currentRelayPacket++;
+
+                if (m_currentRelayPacket < m_relayPackets.size())
+                {
+                    // Send the next packet after receiving ACK.
+                    serial->write(
+                        m_relayPackets[m_currentRelayPacket]);
+
+                    emit executeWriteToNotes(
+                        QString("Relay TX Packet %1")
+                            .arg(m_currentRelayPacket + 1));
+
+                    emit executeWriteToNotes(
+                        QString(
+                            m_relayPackets[m_currentRelayPacket]
+                                .toHex(' ').toUpper()));
+                }
+                else
+                {
+                    // All Relay packets acknowledged.
+                    m_waitingForRelayPacketAck = false;
+                    m_waitingForRelayResults = true;
+
+                    emit executeWriteToNotes(
+                        "Relay Transmission Completed");
+
+                    emit executeWriteToNotes(
+                        "Waiting for Relay results...");
+
+                    qDebug()
+                        << "Relay transmission complete;"
+                        << "waiting for results.";
+                }
+
+                continue;
+            }
+
         }
         else
         {
@@ -1476,4 +2335,6 @@ void TestController::onReadyRead()
             buffer.remove(0, 1);
         }
     }
+    //Ack While loop End
 }
+//Ready Read End

@@ -74,6 +74,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->tableView_patch->setModel(patchModel);
     ui->tableView_patch->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     patchModel->setEditStrategy(QSqlTableModel::OnManualSubmit);
+    ui->tableView_patch->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tableView_patch->setSelectionMode(QAbstractItemView::SingleSelection);
 
     //harness model
     harnessModel = new QSqlTableModel(this,db);
@@ -82,11 +84,31 @@ MainWindow::MainWindow(QWidget *parent)
     harnessModel->setEditStrategy(QSqlTableModel::OnManualSubmit);
     ui->tableView_harness->verticalHeader()->setVisible(true);
 
-    ui->tableView_patch->setSelectionBehavior(QAbstractItemView::SelectRows);
+    // Relay model
+    relayModel = new QSqlTableModel(this, db);
+    ui->tableView_Relay->setModel(relayModel);
+    ui->tableView_Relay->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::Stretch);
+    ui->tableView_Relay->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ui->tableView_Relay->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tableView_Relay->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tableView_Relay->verticalHeader()->setVisible(true);
 
-    ui->tableView_patch->setSelectionMode(QAbstractItemView::SingleSelection);
+    // Diode model
+    diodeModel = new QSqlTableModel(this, db);
+    ui->tableView_diode->setModel(diodeModel);
+    ui->tableView_diode->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::Stretch);
+    ui->tableView_diode->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ui->tableView_diode->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tableView_diode->setSelectionMode(QAbstractItemView::SingleSelection);
+    ui->tableView_diode->verticalHeader()->setVisible(true);
+
     ui->stackedWidget->setCurrentIndex(0);
+
     ui->lineEdit_newPassword->setEchoMode(QLineEdit::Password);
+
+
 
     // For Live Data Upload
     connect(test,
@@ -194,6 +216,87 @@ MainWindow::MainWindow(QWidget *parent)
             &TestController::insulationNetMarkerReceived,
             this,
             &MainWindow::onInsulationNetMarkerReceived);
+
+    //Diode Test Slots
+    // =====================================================
+    // DIODE RESULT -> UI TABLE
+    // =====================================================
+
+    connect(test,
+            &TestController::diodeResultReceived,
+            this,
+            [this](int row, const QString &result)
+    {
+        if (!m_diodeTestModel)
+            return;
+
+        if (row < 0 || row >= m_diodeTestModel->rowCount())
+            return;
+
+        // Result column = 7
+        QStandardItem *item =
+            m_diodeTestModel->item(row, 7);
+
+        if (item)
+        {
+            item->setText(result);
+
+            // PASS = light green; all other results = light red
+            if (result == "PASS")
+            {
+                item->setBackground(QColor(200, 255, 200));
+            }
+            else
+            {
+                item->setBackground(QColor(255, 200, 200));
+            }
+        }
+
+        // Update progress
+        ui->progressBar_DiodeTest->setValue(row + 1);
+
+        // Auto-scroll to the latest result
+        QModelIndex resultIndex =
+            m_diodeTestModel->index(row, 7);
+
+        ui->tableView_diodeTest->scrollTo(
+            resultIndex,
+            QAbstractItemView::PositionAtBottom);
+    });
+
+    // =====================================================
+    // DIODE TEST COMPLETED
+    // =====================================================
+
+    connect(test,
+            &TestController::diodeResultsCompleted,
+            this,
+            [this]()
+    {
+        ui->progressBar_DiodeTest->setValue(
+            ui->progressBar_DiodeTest->maximum());
+
+        ui->label_test_Diode->setText(
+            "Diode Test Completed");
+
+        writeToNotes("Diode Test Completed");
+
+        QMessageBox::information(
+            this,
+            "Diode Test",
+            "Diode test completed successfully.");
+    });
+
+    //Relay Test Slots
+    connect(test,
+            &TestController::relayResultReceived,
+            this,
+            &MainWindow::onRelayResultReceived);
+
+    connect(test,
+            &TestController::relayResultsCompleted,
+            this,
+            &MainWindow::onRelayResultsCompleted);
 
 }
 MainWindow::~MainWindow()
@@ -1024,6 +1127,28 @@ bool MainWindow::processCsvFile(const QString &fileName,
     QVector<QString> sourceConTemp, sourcePinTemp;
     QVector<QString> destConTemp, destPinTemp;
     QVector<QString> expTemp;
+
+    // Diode temporary vectors
+    QVector<QString> diodeCableTemp;
+    QVector<QString> diodeAnodeConTemp, diodeAnodePinTemp;
+    QVector<QString> diodeCathodeConTemp, diodeCathodePinTemp;
+    QVector<QString> diodeExpVoltageTemp;
+
+    // Relay temporary vectors
+    QVector<QString> relayCableTemp;
+
+    QVector<QString> relaySourceConTemp;
+    QVector<QString> relaySourcePinTemp;
+
+    QVector<QString> relaySideConTemp;
+    QVector<QString> relaySideRSPinsTemp;
+
+    QVector<QString> relayDestConTemp;
+    QVector<QString> relayDestPinTemp;
+
+    QVector<QString> relayExcitationVoltageTemp;
+    QVector<QString> relayExpTemp;
+
     // ⭐ IMPORTANT LOG ENTRY
     writeToNotes("Processing CSV → Cable: " + cableNameFromUI +
                  ", Type: " + type +
@@ -1031,25 +1156,198 @@ bool MainWindow::processCsvFile(const QString &fileName,
 
     int lineNumber = 0;
 
-    while (!stream.atEnd()) {
+    enum class HarnessSection
+    {
+        Harness,
+        Relay,
+        Diode
+    };
 
+    HarnessSection currentSection = HarnessSection::Harness;
+    bool skipSectionHeader = false;
+
+    bool relayDataFound = false;
+    bool diodeDataFound = false;
+
+
+    while (!stream.atEnd())
+    {
         QString line = stream.readLine().trimmed();
         lineNumber++;
 
-        if (line.isEmpty()) continue;
+        if (line.isEmpty())
+            continue;
 
         QStringList parts = line.split(",");
 
-        if (std::all_of(parts.begin(), parts.end(),
-                        [](const QString &s){ return s.trimmed().isEmpty(); }))
+        // Remove only trailing empty columns.
+        // Preserve empty fields between populated columns.
+        while (!parts.isEmpty() && parts.last().trimmed().isEmpty())
         {
-            break; // use continue if you want to move further after empty line
+            parts.removeLast();
         }
 
-        if (type == "patch") {
-            if (parts.size() != 5) {
-                writeToNotes("Malformed PATCH line " + QString::number(lineNumber));
-                ui->textEdit_ErrorLog->append("Malformed PATCH line " + QString::number(lineNumber));
+        // Skip rows containing no actual values.
+        if (std::all_of(parts.begin(), parts.end(),
+                        [](const QString &s)
+                        {
+                            return s.trimmed().isEmpty();
+                        }))
+        {
+            continue;
+        }
+
+        // -------------------------------------------------
+        // Relay and Diode section detection (HARNESS upload only)
+        // -------------------------------------------------
+        if (type == "harness")
+        {
+            // A section marker must occupy the first three
+            // consecutive columns of the same row.
+            auto isSectionMarker = [&parts](const QString &marker)
+            {
+                return parts.size() >= 3 &&
+                       parts[0].trimmed() == marker &&
+                       parts[1].trimmed() == marker &&
+                       parts[2].trimmed() == marker;
+            };
+
+            if (isSectionMarker("#12345"))
+            {
+                currentSection = HarnessSection::Relay;
+                skipSectionHeader = true;
+
+                writeToNotes(
+                    "Relay section detected at line " +
+                    QString::number(lineNumber));
+
+                continue;
+            }
+
+            if (isSectionMarker("#54321"))
+            {
+                currentSection = HarnessSection::Diode;
+                skipSectionHeader = true;
+
+                writeToNotes(
+                    "Diode section detected at line " +
+                    QString::number(lineNumber));
+
+                continue;
+            }
+
+
+            // -------------------------------------------------
+            // Relay section: 9 columns
+            // -------------------------------------------------
+            if (currentSection == HarnessSection::Relay)
+            {
+                if (parts.size() != 9)
+                {
+                    QString error =
+                        "Relay row must contain 9 columns at line " +
+                        QString::number(lineNumber) +
+                        ". Found: " + QString::number(parts.size());
+
+                    writeToNotes("❌ " + error);
+                    ui->textEdit_ErrorLog->append("❌ " + error);
+
+                    file.close();
+                    return false;
+                }
+
+                if (skipSectionHeader)
+                {
+                    skipSectionHeader = false;
+
+                    writeToNotes(
+                        "Relay header validated at line " +
+                        QString::number(lineNumber));
+
+                    continue;
+                }
+
+                // Store Relay data in temporary vectors
+                relayCableTemp.append(parts[0].trimmed());
+
+                relaySourceConTemp.append(parts[1].trimmed());
+                relaySourcePinTemp.append(parts[2].trimmed());
+
+                relaySideConTemp.append(parts[3].trimmed());
+                relaySideRSPinsTemp.append(parts[4].trimmed());
+
+                relayDestConTemp.append(parts[5].trimmed());
+                relayDestPinTemp.append(parts[6].trimmed());
+
+                relayExcitationVoltageTemp.append(parts[7].trimmed());
+                relayExpTemp.append(parts[8].trimmed());
+
+                relayDataFound = true;
+
+                continue;
+            }
+
+
+            // -------------------------------------------------
+            // Diode section: 6 columns
+            // -------------------------------------------------
+            if (currentSection == HarnessSection::Diode)
+            {
+                if (parts.size() != 6)
+                {
+                    QString error =
+                        "Diode row must contain 6 columns at line " +
+                        QString::number(lineNumber) +
+                        ". Found: " + QString::number(parts.size());
+
+                    writeToNotes("❌ " + error);
+                    ui->textEdit_ErrorLog->append("❌ " + error);
+
+                    file.close();
+                    return false;
+                }
+
+                if (skipSectionHeader)
+                {
+                    skipSectionHeader = false;
+
+                    writeToNotes(
+                        "Diode header validated at line " +
+                        QString::number(lineNumber));
+
+                    continue;
+                }
+
+                // Store Diode data in separate vectors
+                diodeCableTemp.append(parts[0].trimmed());
+                diodeAnodeConTemp.append(parts[1].trimmed());
+                diodeAnodePinTemp.append(parts[2].trimmed());
+                diodeCathodeConTemp.append(parts[3].trimmed());
+                diodeCathodePinTemp.append(parts[4].trimmed());
+                diodeExpVoltageTemp.append(parts[5].trimmed());
+
+                diodeDataFound = true;
+
+                continue;
+            }
+        }
+
+        // -------------------------------------------------
+        // EXISTING PATCH PROCESSING — unchanged
+        // -------------------------------------------------
+        if (type == "patch")
+        {
+            if (parts.size() != 5)
+            {
+                writeToNotes(
+                    "Malformed PATCH line " +
+                    QString::number(lineNumber));
+
+                ui->textEdit_ErrorLog->append(
+                    "Malformed PATCH line " +
+                    QString::number(lineNumber));
+
+                file.close();
                 return false;
             }
 
@@ -1057,11 +1355,10 @@ bool MainWindow::processCsvFile(const QString &fileName,
             QString pPinStr = parts[4].trimmed();
 
             if (!validatePatchLine(lineNumber, pCon, pPinStr))
+            {
+                file.close();
                 return false;
-
-            //-------------------------------------------------
-            // Convert Logical TP(1-16) -> Physical TP (Edge Case TP15 -> 29,31 HANDLED)
-            //-------------------------------------------------
+            }
 
             int tpNo = pCon.section('-', 1).toInt();
             int pPin = pPinStr.toInt();
@@ -1073,15 +1370,9 @@ bool MainWindow::processCsvFile(const QString &fileName,
             else
             {
                 if (tpNo == 15)
-                {
-                    // TP15 has SLOT 29 and SLOT 31.
-                    // SLOT 30 is physically missing.
                     tpNo = 31;
-                }
                 else
-                {
                     tpNo = tpNo * 2;
-                }
 
                 pPin -= 64;
             }
@@ -1089,39 +1380,70 @@ bool MainWindow::processCsvFile(const QString &fileName,
             pCon = QString("TP-%1").arg(tpNo);
             pPinStr = QString::number(pPin);
 
-            // ⭐ LOG SUCCESSFUL PATCH LINE
-            writeToNotes("PATCH Line OK (" + QString::number(lineNumber) + "): " +
-                         parts[0].trimmed() + ", " +
-                    parts[1].trimmed() + ", " +
-                    parts[2].trimmed() + ", " +
-                    pCon + ", " + pPinStr);
+            writeToNotes(
+                "PATCH Line OK (" + QString::number(lineNumber) + "): " +
+                parts[0].trimmed() + ", " +
+                parts[1].trimmed() + ", " +
+                parts[2].trimmed() + ", " +
+                pCon + ", " + pPinStr);
 
             cableList.append(parts[0].trimmed());
             userConList.append(parts[1].trimmed());
             userPinList.append(parts[2].trimmed());
             patchConList.append(pCon);
             patchPinList.append(pPinStr.toInt());
-
         }
-        else if (type == "harness")
+        else if (type == "harness" &&
+                 currentSection == HarnessSection::Harness)
         {
             if (parts.size() != 6)
             {
-                writeToNotes("❌ Malformed HARNESS line " + QString::number(lineNumber));
-                 ui->textEdit_ErrorLog->append("❌ Malformed HARNESS line " + QString::number(lineNumber));
+                QString error =
+                    "Malformed HARNESS line " +
+                    QString::number(lineNumber) +
+                    ". Expected 6 columns, found " +
+                    QString::number(parts.size());
+
+                writeToNotes("❌ " + error);
+                ui->textEdit_ErrorLog->append("❌ " + error);
+
+                file.close();
                 return false;
             }
+
             cableTemp.append(parts[0].trimmed());
             sourceConTemp.append(parts[1].trimmed());
             sourcePinTemp.append(parts[2].trimmed());
             destConTemp.append(parts[3].trimmed());
             destPinTemp.append(parts[4].trimmed());
             expTemp.append(parts[5].trimmed());
-
         }
     }
+    //While loop end
+
 
     file.close();
+
+    if (type == "harness")
+    {
+        if (!relayDataFound)
+        {
+            const QString message =
+                "Relay data not detected in the uploaded file.";
+
+            writeToNotes(message);
+            ui->textEdit_ErrorLog->append(message);
+        }
+
+        if (!diodeDataFound)
+        {
+            const QString message =
+                "Diode data not detected in the uploaded file.";
+
+            writeToNotes(message);
+            ui->textEdit_ErrorLog->append(message);
+        }
+    }
 
     // 1️⃣ SAVE PATCH DATA HERE
     if (type == "patch") {
@@ -1153,6 +1475,80 @@ bool MainWindow::processCsvFile(const QString &fileName,
         }
 
         writeToNotes("💾 Saved HARNESS data to DB for cable: " + cableNameFromUI);
+    }
+    // -------------------------------------------------
+    // Run final Diode validations and save to database
+    // -------------------------------------------------
+    if (type == "harness" && diodeDataFound)
+    {
+        if (!validateDiodeData(
+                diodeCableTemp,
+                diodeAnodeConTemp, diodeAnodePinTemp,
+                diodeCathodeConTemp, diodeCathodePinTemp,
+                diodeExpVoltageTemp))
+        {
+            return false;
+        }
+
+        if (!saveDiodeToDb(
+                cableNameFromUI,
+                diodeCableTemp,
+                diodeAnodeConTemp, diodeAnodePinTemp,
+                diodeCathodeConTemp, diodeCathodePinTemp,
+                diodeExpVoltageTemp))
+        {
+            writeToNotes("❌ Failed to save DIODE data to DB");
+            ui->textEdit_ErrorLog->append(
+                "❌ Failed to save DIODE data to DB");
+            return false;
+        }
+
+        writeToNotes(
+            "💾 Saved DIODE data to DB for cable: " +
+            cableNameFromUI);
+    }
+
+    // -------------------------------------------------
+    // Run final Relay validations and save to database
+    // -------------------------------------------------
+    if (type == "harness" && relayDataFound)
+    {
+        if (!validateRelayData(
+                    relayCableTemp,
+                    relaySourceConTemp,
+                    relaySourcePinTemp,
+                    relaySideConTemp,
+                    relaySideRSPinsTemp,
+                    relayDestConTemp,
+                    relayDestPinTemp,
+                    relayExcitationVoltageTemp,
+                    relayExpTemp))
+        {
+            return false;
+        }
+
+        if (!saveRelayToDb(
+                    cableNameFromUI,
+                    relayCableTemp,
+                    relaySourceConTemp,
+                    relaySourcePinTemp,
+                    relaySideConTemp,
+                    relaySideRSPinsTemp,
+                    relayDestConTemp,
+                    relayDestPinTemp,
+                    relayExcitationVoltageTemp,
+                    relayExpTemp))
+        {
+            QString error = "Failed to save RELAY data to DB";
+
+            writeToNotes("❌ " + error);
+            ui->textEdit_ErrorLog->append("❌ " + error);
+            return false;
+        }
+
+        writeToNotes(
+                    "💾 Saved RELAY data to DB for cable: " +
+                    cableNameFromUI);
     }
 
     writeToNotes("✅ CSV processed successfully → Cable: " +
@@ -1385,10 +1781,11 @@ bool MainWindow::validateHarnessData(
     // 100 ± 5
     // 9M ± 2M
     //
+    // Range in ohms: 400-600, 100-200
     // =====================================================
 
     QRegularExpression expRegex(
-        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s\*±\s\*[0-9]+[KM]?)$)",
+        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s*±\s*[0-9]+[KM]?|[0-9]+-[0-9]+)$)",
         QRegularExpression::CaseInsensitiveOption);
 
     for (int i = 0; i < expTemp.size(); i++)
@@ -1682,32 +2079,47 @@ void MainWindow::on_pushButton_backToModes_clicked()
 void MainWindow::on_pushButton_getDetails_clicked()
 {
     QString tableName = ui->comboBox_fileNames->currentText();
+
     ui->pushButton_patchCancel->hide();
 
-    if(tableName.isEmpty())
+    if (tableName.isEmpty())
     {
-        QMessageBox::information(this,"Missing file Name","Select file from dropdown");
+        QMessageBox::information(
+            this, "Missing file Name",
+            "Select file from dropdown");
         return;
     }
-    if(tableName=="Files")
+
+    if (tableName == "Files")
     {
-        QMessageBox::information(this,"Invalid","Select valid fileName");
+        QMessageBox::information(
+            this, "Invalid",
+            "Select valid fileName");
         return;
     }
 
     ui->tabWidget->setCurrentIndex(0);
     ui->stackedWidget->setCurrentIndex(11);
 
-    loadPatchTable(tableName+"_patch");
+    // Patch
+    loadPatchTable(tableName + "_patch");
     ui->label_fileName->setText(tableName);
-    loadHarnessTable(tableName+"_harness");
+
+    // Harness
+    loadHarnessTable(tableName + "_harness");
     ui->label_fileNameH->setText(tableName);
 
+    // Relay (optional)
+    loadRelayTable(tableName + "_relay");
+
+    // Diode (optional)
+    loadDiodeTable(tableName + "_diode");
 }
 
 void MainWindow::on_tabWidget_tabBarClicked(int index)
 {
-    if(index == 2)
+    //Used as back button
+    if(index == 4)
     {
         ui->stackedWidget->setCurrentIndex(10);
     }
@@ -1897,7 +2309,7 @@ void MainWindow::on_pushButton_delCable_clicked()
     if(reply == QMessageBox::Yes)
     {
         writeToNotes("calling del is problem");
-        bool del =deleteCable(selectedFile);
+        bool del = deleteCable(selectedFile);
         writeToNotes("del");
         if(del)
         {
@@ -1916,6 +2328,7 @@ void MainWindow::on_pushButton_delCable_clicked()
         QMessageBox::information(this,"Failed","Delete cancelled");
     }
 }
+
 bool MainWindow::deleteCable(const QString &cableName)
 {
     if (!db.isOpen())
@@ -1924,44 +2337,74 @@ bool MainWindow::deleteCable(const QString &cableName)
         return false;
     }
 
-    QString patchTable = cableName + "_patch";
-
+    QString patchTable   = cableName + "_patch";
     QString harnessTable = cableName + "_harness";
+    QString relayTable   = cableName + "_relay";
+    QString diodeTable   = cableName + "_diode";
 
     // Clear loaded tables from models
-    if(patchModel)
+    if (patchModel)
     {
         patchModel->clear();
         patchModel->setTable("");
     }
 
-    if(harnessModel)
+    if (harnessModel)
     {
         harnessModel->clear();
         harnessModel->setTable("");
+    }
+
+    if (relayModel)
+    {
+        relayModel->clear();
+        relayModel->setTable("");
+    }
+
+    if (diodeModel)
+    {
+        diodeModel->clear();
+        diodeModel->setTable("");
     }
 
     QApplication::processEvents();
 
     QSqlQuery q(db);
 
-    // Drop patch table
+    // Drop Patch table
     if (!q.exec("DROP TABLE IF EXISTS \"" + patchTable + "\""))
     {
-        writeToNotes(q.lastError().text());
-
+        writeToNotes("❌ Failed to drop Patch table: " +
+                     q.lastError().text());
         return false;
     }
 
-    // Drop harness table
-    if (!q.exec("DROP TABLE IF EXISTS \"" +harnessTable + "\""))
+    // Drop Harness table
+    if (!q.exec("DROP TABLE IF EXISTS \"" + harnessTable + "\""))
     {
-        writeToNotes(q.lastError().text());
-
+        writeToNotes("❌ Failed to drop Harness table: " +
+                     q.lastError().text());
         return false;
     }
 
-    writeToNotes("Cable deleted");
+    // Drop Relay table
+    if (!q.exec("DROP TABLE IF EXISTS \"" + relayTable + "\""))
+    {
+        writeToNotes("❌ Failed to drop Relay table: " +
+                     q.lastError().text());
+        return false;
+    }
+
+    // Drop Diode table
+    if (!q.exec("DROP TABLE IF EXISTS \"" + diodeTable + "\""))
+    {
+        writeToNotes("❌ Failed to drop Diode table: " +
+                     q.lastError().text());
+        return false;
+    }
+
+    writeToNotes("✅ Cable and associated Patch, Harness, Relay, "
+                 "and Diode tables deleted.");
 
     return true;
 }
@@ -3842,6 +4285,322 @@ void MainWindow::onInsulationNetMarkerReceived(
              << ui->progressBar_InsuIsoTest->value();
 }
 
+void MainWindow::onRelayResultReceived(
+    int row, float measuredValue)
+{
+    if (!m_relayTestModel ||
+        row < 0 ||
+        row >= m_relayTestModel->rowCount())
+    {
+        return;
+    }
+
+    // =====================================================
+    // 1. Store raw measured value
+    // =====================================================
+
+    if (row >= m_relayMeasuredValues.size())
+        return;
+
+    m_relayMeasuredValues[row] = measuredValue;
+
+    // =====================================================
+    // 2. Update Measured Value column
+    // Column 11 = Measured Value
+    // =====================================================
+
+    m_relayTestModel->setData(
+        m_relayTestModel->index(row, 11),
+        QString::number(measuredValue, 'f', 3));
+
+    // =====================================================
+    // 3. Select current row
+    // =====================================================
+
+    ui->tableView_relay->selectRow(row);
+
+    // =====================================================
+    // 4. Scroll to current row
+    // =====================================================
+
+    ui->tableView_relay->scrollTo(
+        m_relayTestModel->index(row, 0),
+        QAbstractItemView::PositionAtBottom);
+
+    // =====================================================
+    // 5. Update progress bar
+    // =====================================================
+
+    ui->progressBar_RelayTest->setValue(row + 1);
+
+    qDebug() << "Relay Live Result:"
+             << "Row:" << row + 1
+             << "Value:" << measuredValue;
+}
+
+void MainWindow::onRelayResultsCompleted()
+{
+    if (!m_relayTestModel)
+        return;
+
+    const int rowCount = m_relayTestModel->rowCount();
+
+    const int resultCount =
+        qMin(m_relayMeasuredValues.size(), rowCount);
+
+    // =====================================================
+    // Process all Relay results
+    // =====================================================
+
+    for (int row = 0; row < resultCount; ++row)
+    {
+        const float measuredOhms =
+            m_relayMeasuredValues[row];
+
+        // =================================================
+        // 1. Convert measured value to readable format
+        // =================================================
+
+        QString measuredText;
+
+        if (qAbs(measuredOhms) >= 1000000000.0)
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms / 1000000000.0,
+                    'f', 3) + "GΩ";
+        }
+        else if (qAbs(measuredOhms) >= 1000000.0)
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms / 1000000.0,
+                    'f', 3) + "MΩ";
+        }
+        else if (qAbs(measuredOhms) >= 1000.0)
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms / 1000.0,
+                    'f', 3) + "KΩ";
+        }
+        else
+        {
+            measuredText =
+                QString::number(
+                    measuredOhms,
+                    'f', 3) + "Ω";
+        }
+
+        // =================================================
+        // 2. Update Measured Value
+        // Column 11
+        // =================================================
+
+        m_relayTestModel->setData(
+            m_relayTestModel->index(row, 11),
+            measuredText);
+
+        // =================================================
+        // 3. Get Expected Value
+        // Column 9
+        // =================================================
+
+        const QString expected =
+            m_relayTestModel->index(row, 9)
+                .data().toString().trimmed();
+
+        // =================================================
+        // 4. Compare measured against expected
+        // =================================================
+
+        const bool pass =
+            checkRelayExpected(measuredOhms, expected);
+
+        // =================================================
+        // 5. Update PASS / FAIL
+        // Column 12
+        // =================================================
+
+        const QModelIndex resultIndex =
+            m_relayTestModel->index(row, 12);
+
+        m_relayTestModel->setData(
+            resultIndex,
+            pass ? "PASS" : "FAIL");
+
+        // =================================================
+        // 6. Light green / light red background
+        // =================================================
+
+        const QColor resultColor =
+            pass ? QColor(200, 245, 200)
+                 : QColor(255, 205, 205);
+
+        m_relayTestModel->setData(
+            resultIndex,
+            QBrush(resultColor),
+            Qt::BackgroundRole);
+
+        // =================================================
+        // 7. Remarks
+        // Column 13
+        // =================================================
+
+        m_relayTestModel->setData(
+            m_relayTestModel->index(row, 13),
+            pass ? "Within expected range"
+                 : "Measured value out of range");
+
+        writeToNotes(
+            QString("Relay Result %1 | Measured: %2 | "
+                    "Expected: %3 | %4")
+                .arg(row + 1)
+                .arg(measuredText)
+                .arg(expected)
+                .arg(pass ? "PASS" : "FAIL"));
+    }
+
+    // =====================================================
+    // 8. Return table to top
+    // =====================================================
+
+    ui->tableView_relay->clearSelection();
+
+    ui->tableView_relay->scrollTo(
+        m_relayTestModel->index(0, 0),
+        QAbstractItemView::PositionAtTop);
+
+    // =====================================================
+    // 9. Completion popup
+    // =====================================================
+
+    writeToNotes(
+        QString("Relay comparison completed. Results: %1")
+            .arg(resultCount));
+
+    QMessageBox::information(
+        this,
+        "Relay Test",
+                "Relay Test Completed Successfully.");
+}
+
+bool MainWindow::checkRelayExpected(
+    float measuredOhms,
+    const QString &expected)
+{
+    const QString value = expected.trimmed();
+
+    // Convert a resistance number with optional K/M/G
+    // and optional Ω into ohms.
+    auto parseOhms = [](const QString &text,
+                         double &ohms) -> bool
+    {
+        static const QRegularExpression numberRegex(
+            R"(^\s*([0-9]+(?:\.[0-9]+)?)\s*([KMG]?)\s*Ω?\s*$)",
+            QRegularExpression::CaseInsensitiveOption);
+
+        const QRegularExpressionMatch match =
+            numberRegex.match(text);
+
+        if (!match.hasMatch())
+            return false;
+
+        ohms = match.captured(1).toDouble();
+
+        const QString unit =
+            match.captured(2).toUpper();
+
+        if (unit == "K")
+            ohms *= 1000.0;
+        else if (unit == "M")
+            ohms *= 1000000.0;
+        else if (unit == "G")
+            ohms *= 1000000000.0;
+
+        return true;
+    };
+
+    // =====================================================
+    // 1. Less than / Greater than
+    // Examples: <2, >10K, <2Ω, >10MΩ
+    // =====================================================
+
+    if (value.startsWith('<') ||
+        value.startsWith('>'))
+    {
+        double limit = 0.0;
+
+        if (!parseOhms(value.mid(1), limit))
+            return false;
+
+        if (value.startsWith('<'))
+            return measuredOhms < limit;
+
+        return measuredOhms > limit;
+    }
+
+    // =====================================================
+    // 2. Tolerance format
+    // Examples: 20K ± 3, 20KΩ ± 3KΩ
+    // =====================================================
+
+    if (value.contains(QChar(0x00B1)))
+    {
+        const QStringList parts =
+            value.split(QChar(0x00B1));
+
+        if (parts.size() != 2)
+            return false;
+
+        double nominal = 0.0;
+        double tolerance = 0.0;
+
+        if (!parseOhms(parts[0], nominal) ||
+            !parseOhms(parts[1], tolerance))
+        {
+            return false;
+        }
+
+        return measuredOhms >= nominal - tolerance &&
+               measuredOhms <= nominal + tolerance;
+    }
+
+    // =====================================================
+    // 3. Min-Max range format
+    // Examples: 400-600, 1K-2K, 400Ω-600Ω
+    // =====================================================
+
+    if (value.contains('-'))
+    {
+        const QStringList parts = value.split('-');
+
+        if (parts.size() != 2)
+            return false;
+
+        double minimum = 0.0;
+        double maximum = 0.0;
+
+        if (!parseOhms(parts[0], minimum) ||
+            !parseOhms(parts[1], maximum))
+        {
+            return false;
+        }
+
+        if (minimum > maximum)
+            return false;
+
+        return measuredOhms >= minimum &&
+               measuredOhms <= maximum;
+    }
+
+    // =====================================================
+    // 4. Invalid / unsupported expected format
+    // =====================================================
+
+    return false;
+}
+
 void MainWindow::populateInsulationTable(
     const QVector<InsulationTableNet> &nets,
     const QVariantList &patchData)
@@ -3991,6 +4750,19 @@ void MainWindow::populateInsulationTable(
 
     // Force the table to the top
     ui->tableView_InsuIso->scrollToTop();
+
+    // Disable editing
+    ui->tableView_InsuIso->setEditTriggers(
+                QAbstractItemView::NoEditTriggers);
+
+    // Allow only one row selection
+    ui->tableView_InsuIso->setSelectionBehavior(
+                QAbstractItemView::SelectRows);
+
+    ui->tableView_InsuIso->setSelectionMode(
+                QAbstractItemView::SingleSelection);
+
+    ui->tableView_InsuIso->setAlternatingRowColors(true);
 }
 
 QString MainWindow::getActualConnectorName(
@@ -4026,8 +4798,1810 @@ QString MainWindow::getActualConnectorName(
     // If mapping is not found
     return QString("(\"%1\", \"%2\")")
         .arg(hardwareCon)
-        .arg(hardwarePin);
+            .arg(hardwarePin);
 }
+
+bool MainWindow::validateDiodeData(
+    const QVector<QString> &cableTemp,
+    const QVector<QString> &anodeConTemp,
+    const QVector<QString> &anodePinTemp,
+    const QVector<QString> &cathodeConTemp,
+    const QVector<QString> &cathodePinTemp,
+    const QVector<QString> &expVoltageTemp)
+{
+    int count = cableTemp.size();
+
+    if (count == 0)
+    {
+        writeToNotes("❌ No Diode data available to validate.");
+        ui->textEdit_ErrorLog->append(
+            "❌ No Diode data available to validate.");
+        return false;
+    }
+
+    if (anodeConTemp.size() != count ||
+        anodePinTemp.size() != count ||
+        cathodeConTemp.size() != count ||
+        cathodePinTemp.size() != count ||
+        expVoltageTemp.size() != count)
+    {
+        QString error =
+            "Diode validation failed: vector sizes do not match.";
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    // =====================================================
+    // Validate Anode / Cathode against Patch data
+    // =====================================================
+
+    QStringList missingRows;
+
+    for (int i = 0; i < count; ++i)
+    {
+        int matchAnode = 0;
+        int matchCathode = 0;
+
+        for (int j = 0; j < userConList.size(); ++j)
+        {
+            if (anodeConTemp[i].simplified() ==
+                    userConList[j].simplified() &&
+                anodePinTemp[i].simplified() ==
+                    userPinList[j].simplified())
+            {
+                matchAnode++;
+            }
+
+            if (cathodeConTemp[i].simplified() ==
+                    userConList[j].simplified() &&
+                cathodePinTemp[i].simplified() ==
+                    userPinList[j].simplified())
+            {
+                matchCathode++;
+            }
+        }
+
+        if (matchAnode == 0 || matchCathode == 0)
+        {
+            QString problem;
+
+            if (matchAnode == 0 && matchCathode == 0)
+            {
+                problem =
+                    "Anode and Cathode not found in Patch data";
+            }
+            else if (matchAnode == 0)
+            {
+                problem = "Anode not found in Patch data";
+            }
+            else
+            {
+                problem = "Cathode not found in Patch data";
+            }
+
+            QString log =
+                QString(
+                    "Row %1 | Cable: %2 | "
+                    "Anode: %3 - %4 | "
+                    "Cathode: %5 - %6 | %7")
+                .arg(i + 1)
+                .arg(cableTemp[i])
+                .arg(anodeConTemp[i])
+                .arg(anodePinTemp[i])
+                .arg(cathodeConTemp[i])
+                .arg(cathodePinTemp[i])
+                .arg(problem);
+
+            missingRows.append(log);
+        }
+    }
+
+    if (!missingRows.isEmpty())
+    {
+        QString missingLog =
+            "❌ DIODE PATCH VALIDATION FAILED\n\n" +
+            missingRows.join("\n");
+
+        writeToNotes(missingLog);
+        ui->textEdit_ErrorLog->append(missingLog);
+
+        return false;
+    }
+
+    // =====================================================
+    // Validate fields and expected voltage
+    // =====================================================
+
+    static const QRegularExpression voltageRegex(
+        R"(^\s*\d+(?:\.\d+)?-\d+(?:\.\d+)?V\s*$)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    for (int i = 0; i < count; ++i)
+    {
+        QStringList fields = {
+            cableTemp[i],
+            anodeConTemp[i],
+            anodePinTemp[i],
+            cathodeConTemp[i],
+            cathodePinTemp[i],
+            expVoltageTemp[i]
+        };
+
+        for (int col = 0; col < fields.size(); ++col)
+        {
+            if (fields[col].trimmed().isEmpty())
+            {
+                QString error =
+                    QString("Empty field in Diode row %1, column %2.")
+                    .arg(i + 1)
+                    .arg(col + 1);
+
+                writeToNotes("❌ " + error);
+                ui->textEdit_ErrorLog->append("❌ " + error);
+                return false;
+            }
+        }
+
+        if (!voltageRegex.match(expVoltageTemp[i]).hasMatch())
+        {
+            QString error =
+                QString("Invalid Diode voltage in row %1: %2. "
+                        "Expected format: float-floatV.")
+                .arg(i + 1)
+                .arg(expVoltageTemp[i]);
+
+            writeToNotes("❌ " + error);
+            ui->textEdit_ErrorLog->append("❌ " + error);
+            return false;
+        }
+    }
+
+    writeToNotes("✅ Diode data validation successful.");
+    return true;
+}
+
+bool MainWindow::saveDiodeToDb(
+    const QString &cableName,
+    const QVector<QString> &cableTemp,
+    const QVector<QString> &anodeConTemp,
+    const QVector<QString> &anodePinTemp,
+    const QVector<QString> &cathodeConTemp,
+    const QVector<QString> &cathodePinTemp,
+    const QVector<QString> &expVoltageTemp)
+{
+    QString tableName = cableName + "_diode";
+    tableName.replace(" ", "_");
+
+    QSqlQuery q(db);
+
+    QString create =
+        "CREATE TABLE IF NOT EXISTS " + tableName + " ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "cable TEXT,"
+        "anodeCon TEXT,"
+        "anodePin TEXT,"
+        "cathodeCon TEXT,"
+        "cathodePin TEXT,"
+        "expVoltage TEXT"
+        ")";
+
+    if (!q.exec(create))
+    {
+        QString error =
+            "Failed to create table " + tableName + ": " +
+            q.lastError().text();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    if (!db.transaction())
+    {
+        QString error =
+            "Failed to start Diode transaction: " +
+            db.lastError().text();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    if (!q.exec("DELETE FROM " + tableName))
+    {
+        QString error =
+            "Failed to clear table " + tableName + ": " +
+            q.lastError().text();
+
+        db.rollback();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    q.prepare(
+        "INSERT INTO " + tableName +
+        " (cable, anodeCon, anodePin, "
+        "cathodeCon, cathodePin, expVoltage) "
+        "VALUES (?, ?, ?, ?, ?, ?)");
+
+    for (int i = 0; i < cableTemp.size(); ++i)
+    {
+        q.addBindValue(cableTemp[i]);
+        q.addBindValue(anodeConTemp[i]);
+        q.addBindValue(anodePinTemp[i]);
+        q.addBindValue(cathodeConTemp[i]);
+        q.addBindValue(cathodePinTemp[i]);
+        q.addBindValue(expVoltageTemp[i]);
+
+        if (!q.exec())
+        {
+            QString error =
+                "Diode insert failed in " + tableName + ": " +
+                q.lastError().text();
+
+            db.rollback();
+
+            writeToNotes("❌ " + error);
+            ui->textEdit_ErrorLog->append("❌ " + error);
+            return false;
+        }
+    }
+
+    if (!db.commit())
+    {
+        QString error =
+            "Failed to commit Diode transaction: " +
+            db.lastError().text();
+
+        db.rollback();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    writeToNotes(
+        "✅ Diode data stored in table: " + tableName);
+
+    return true;
+}
+
+
+bool MainWindow::validateRelayData(
+    const QVector<QString> &cableTemp,
+    const QVector<QString> &sourceConTemp,
+    const QVector<QString> &sourcePinTemp,
+    const QVector<QString> &relaySideConTemp,
+    const QVector<QString> &relaySideRSPinsTemp,
+    const QVector<QString> &destConTemp,
+    const QVector<QString> &destPinTemp,
+    const QVector<QString> &excitationVoltageTemp,
+    const QVector<QString> &expTemp)
+{
+    const int count = cableTemp.size();
+
+    auto reportError = [this](const QString &error)
+    {
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+    };
+
+    if (count == 0)
+    {
+        reportError("No Relay data available to validate.");
+        return false;
+    }
+
+    if (sourceConTemp.size() != count ||
+        sourcePinTemp.size() != count ||
+        relaySideConTemp.size() != count ||
+        relaySideRSPinsTemp.size() != count ||
+        destConTemp.size() != count ||
+        destPinTemp.size() != count ||
+        excitationVoltageTemp.size() != count ||
+        expTemp.size() != count)
+    {
+        reportError(
+            "Relay validation failed: vector sizes do not match.");
+        return false;
+    }
+
+    // Expected resistance formats, same as Harness
+    const QRegularExpression expRegex(
+        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s*±\s*[0-9]+[KM]?|[0-9]+-[0-9]+)$)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    // Excitation voltage must be an integer from 1V to 34V
+    const QRegularExpression voltageRegex(
+        R"(^([0-9]+)V$)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    // Relay side connector must be Relay_X
+    const QRegularExpression relayRegex(
+                R"(^Relay_([1-9][0-9]*)(?:\s+.*)?$)",
+                QRegularExpression::CaseInsensitiveOption);
+
+    QSet<QString> completedRelays;
+    QSet<QString> coilPairsSeen;
+
+    QString currentRelay;
+    bool currentRelayHasCoil = false;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const QString relay =
+            relaySideConTemp[i].simplified();
+
+        const QString rsPins =
+            relaySideRSPinsTemp[i].simplified();
+
+        const QString voltage =
+            excitationVoltageTemp[i].simplified();
+
+        const QString expected =
+            expTemp[i].simplified();
+
+        // ---------------------------------------------
+        // Required fields
+        // ---------------------------------------------
+
+        QStringList requiredFields = {
+            cableTemp[i],
+            sourceConTemp[i],
+            sourcePinTemp[i],
+            relay,
+            rsPins,
+            destConTemp[i],
+            destPinTemp[i],
+            expected
+        };
+
+        for (int col = 0; col < requiredFields.size(); ++col)
+        {
+            if (requiredFields[col].trimmed().isEmpty())
+            {
+                reportError(
+                    QString("Empty required field in Relay row %1, column %2.")
+                        .arg(i + 1)
+                        .arg(col + 1));
+                return false;
+            }
+        }
+
+        // ---------------------------------------------
+        // Validate Relay_X naming
+        // ---------------------------------------------
+
+        const auto relayMatch = relayRegex.match(relay);
+
+        if (!relayMatch.hasMatch())
+        {
+            reportError(
+                QString("Invalid Relay-side connector at row %1: %2. "
+                        "Expected Relay_X.")
+                    .arg(i + 1)
+                    .arg(relay));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Relay groups must be contiguous.
+        // Each new group must start with X1&X2.
+        // ---------------------------------------------
+
+        if (relay != currentRelay)
+        {
+            if (!currentRelay.isEmpty())
+            {
+                if (!currentRelayHasCoil)
+                {
+                    reportError(
+                        QString("%1 has no mandatory X1&X2 pair.")
+                            .arg(currentRelay));
+                    return false;
+                }
+
+                completedRelays.insert(currentRelay);
+            }
+
+            if (completedRelays.contains(relay))
+            {
+                reportError(
+                    QString("%1 appears in multiple separate groups.")
+                        .arg(relay));
+                return false;
+            }
+
+            currentRelay = relay;
+            currentRelayHasCoil = false;
+
+            if (rsPins != "X1&X2")
+            {
+                reportError(
+                    QString("First row of %1 must use X1&X2. "
+                            "Found %2 at row %3.")
+                        .arg(relay)
+                        .arg(rsPins)
+                        .arg(i + 1));
+                return false;
+            }
+        }
+
+        // ---------------------------------------------
+        // Validate supported relay-side pin pairs
+        // ---------------------------------------------
+
+        const bool isXPair = (rsPins == "X1&X2");
+        const bool isYPair = (rsPins == "Y1&Y2");
+
+        const bool isContactPair =
+            rsPins.contains('&') &&
+            !isXPair &&
+            !isYPair;
+
+        if (!isXPair && !isYPair && !isContactPair)
+        {
+            reportError(
+                QString("Invalid RSPins at Relay row %1: %2")
+                    .arg(i + 1)
+                    .arg(rsPins));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // X1&X2 must occur exactly once per relay
+        // ---------------------------------------------
+
+        if (isXPair)
+        {
+            if (currentRelayHasCoil)
+            {
+                reportError(
+                    QString("%1 contains duplicate X1&X2 pairs.")
+                        .arg(relay));
+                return false;
+            }
+
+            currentRelayHasCoil = true;
+            coilPairsSeen.insert(relay);
+        }
+
+        // ---------------------------------------------
+        // Validate excitation voltage
+        // Required for X1&X2 and Y1&Y2 only.
+        // ---------------------------------------------
+
+        if (isXPair || isYPair)
+        {
+            const auto voltageMatch =
+                voltageRegex.match(voltage);
+
+            if (!voltageMatch.hasMatch())
+            {
+                reportError(
+                    QString("Relay row %1: %2 requires an excitation "
+                            "voltage in the format 1V to 34V.")
+                        .arg(i + 1)
+                        .arg(rsPins));
+                return false;
+            }
+
+            bool ok = false;
+            const int voltageValue =
+                voltageMatch.captured(1).toInt(&ok);
+
+            if (!ok || voltageValue < 1 || voltageValue > 34)
+            {
+                reportError(
+                    QString("Invalid excitation voltage at Relay row %1: %2. "
+                            "Allowed range is 1V to 34V.")
+                        .arg(i + 1)
+                        .arg(voltage));
+                return false;
+            }
+        }
+        else if (isContactPair && !voltage.isEmpty())
+        {
+            reportError(
+                QString("Relay row %1: excitation voltage must be empty "
+                        "for contact pair %2.")
+                    .arg(i + 1)
+                    .arg(rsPins));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Validate expected resistance
+        // ---------------------------------------------
+
+        if (!expRegex.match(expected).hasMatch())
+        {
+            reportError(
+                QString("Invalid expected resistance at Relay row %1: %2")
+                    .arg(i + 1)
+                    .arg(expected));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Source connector + pin must exist in Patch
+        // ---------------------------------------------
+
+        bool sourceFound = false;
+
+        for (int j = 0; j < userConList.size(); ++j)
+        {
+            if (sourceConTemp[i].simplified() ==
+                    userConList[j].simplified() &&
+                sourcePinTemp[i].simplified() ==
+                    userPinList[j].simplified())
+            {
+                sourceFound = true;
+                break;
+            }
+        }
+
+        if (!sourceFound)
+        {
+            reportError(
+                QString("Relay row %1: Source connector/pin %2 / %3 "
+                        "does not exist in Patch data.")
+                    .arg(i + 1)
+                    .arg(sourceConTemp[i])
+                    .arg(sourcePinTemp[i]));
+            return false;
+        }
+
+        // ---------------------------------------------
+        // Destination connector + pin must exist in Patch
+        // ---------------------------------------------
+
+        bool destFound = false;
+
+        for (int j = 0; j < userConList.size(); ++j)
+        {
+            if (destConTemp[i].simplified() ==
+                    userConList[j].simplified() &&
+                destPinTemp[i].simplified() ==
+                    userPinList[j].simplified())
+            {
+                destFound = true;
+                break;
+            }
+        }
+
+        if (!destFound)
+        {
+            reportError(
+                QString("Relay row %1: Destination connector/pin %2 / %3 "
+                        "does not exist in Patch data.")
+                    .arg(i + 1)
+                    .arg(destConTemp[i])
+                    .arg(destPinTemp[i]));
+            return false;
+        }
+    }
+
+    // Validate the final relay group
+    if (!currentRelay.isEmpty() && !currentRelayHasCoil)
+    {
+        reportError(
+            QString("%1 has no mandatory X1&X2 pair.")
+                .arg(currentRelay));
+        return false;
+    }
+
+    writeToNotes("✅ Relay data validation successful.");
+    return true;
+}
+
+
+bool MainWindow::saveRelayToDb(
+    const QString &cableName,
+    const QVector<QString> &cableTemp,
+    const QVector<QString> &sourceConTemp,
+    const QVector<QString> &sourcePinTemp,
+    const QVector<QString> &relaySideConTemp,
+    const QVector<QString> &relaySideRSPinsTemp,
+    const QVector<QString> &destConTemp,
+    const QVector<QString> &destPinTemp,
+    const QVector<QString> &excitationVoltageTemp,
+    const QVector<QString> &expTemp)
+{
+    const int count = cableTemp.size();
+
+    // Validate vector sizes.
+    if (count == 0 ||
+        sourceConTemp.size() != count ||
+        sourcePinTemp.size() != count ||
+        relaySideConTemp.size() != count ||
+        relaySideRSPinsTemp.size() != count ||
+        destConTemp.size() != count ||
+        destPinTemp.size() != count ||
+        excitationVoltageTemp.size() != count ||
+        expTemp.size() != count)
+    {
+        writeToNotes("❌ Relay data vectors have inconsistent sizes.");
+        return false;
+    }
+
+    if (!db.isOpen())
+    {
+        writeToNotes("❌ Database is not open.");
+        return false;
+    }
+
+    const QString tableName = cableName + "_relay";
+
+    static const QRegularExpression validIdentifier(
+        R"(^[A-Za-z0-9_]+$)");
+
+    if (!validIdentifier.match(tableName).hasMatch())
+    {
+        writeToNotes("❌ Invalid Relay table name.");
+        return false;
+    }
+
+    QSqlQuery query(db);
+
+    // Create the table if it does not exist.
+    const QString createSql =
+        QString(R"(
+            CREATE TABLE IF NOT EXISTS "%1" (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cable TEXT,
+                sourceCon TEXT,
+                sourcePin TEXT,
+                relaySideCon TEXT,
+                relaySideRSPins TEXT,
+                destCon TEXT,
+                destPin TEXT,
+                excitationVoltage TEXT,
+                exp TEXT
+            )
+        )").arg(tableName);
+
+    if (!query.exec(createSql))
+    {
+        writeToNotes(
+            "❌ Failed to create Relay table: " +
+            query.lastError().text());
+        return false;
+    }
+
+    // Start transaction.
+    if (!db.transaction())
+    {
+        writeToNotes(
+            "❌ Failed to start Relay transaction: " +
+            db.lastError().text());
+        return false;
+    }
+
+    // Insert Relay data without deleting existing records.
+    const QString insertSql =
+        QString(R"(
+            INSERT INTO "%1" (
+                cable,
+                sourceCon,
+                sourcePin,
+                relaySideCon,
+                relaySideRSPins,
+                destCon,
+                destPin,
+                excitationVoltage,
+                exp
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        )").arg(tableName);
+
+    if (!query.prepare(insertSql))
+    {
+        writeToNotes(
+            "❌ Relay prepare failed: " +
+            query.lastError().text());
+
+        db.rollback();
+        return false;
+    }
+
+    for (int i = 0; i < count; ++i)
+    {
+        query.bindValue(0, cableTemp[i]);
+        query.bindValue(1, sourceConTemp[i]);
+        query.bindValue(2, sourcePinTemp[i]);
+        query.bindValue(3, relaySideConTemp[i]);
+        query.bindValue(4, relaySideRSPinsTemp[i]);
+        query.bindValue(5, destConTemp[i]);
+        query.bindValue(6, destPinTemp[i]);
+        query.bindValue(7, excitationVoltageTemp[i]);
+        query.bindValue(8, expTemp[i]);
+
+        if (!query.exec())
+        {
+            writeToNotes(
+                QString("❌ Relay insert failed at row %1: %2")
+                    .arg(i + 1)
+                    .arg(query.lastError().text()));
+
+            db.rollback();
+            return false;
+        }
+    }
+
+    if (!db.commit())
+    {
+        writeToNotes(
+            "❌ Relay commit failed: " +
+            db.lastError().text());
+
+        db.rollback();
+        return false;
+    }
+
+    writeToNotes(
+        QString("✅ Saved %1 Relay rows to table: %2")
+            .arg(count)
+            .arg(tableName));
+
+    return true;
+}
+
+
+void MainWindow::loadRelayTable(const QString &tableName)
+{
+    relayModel->setTable(tableName);
+
+    if (!relayModel->select())
+    {
+        writeToNotes("Relay table unavailable: " + tableName);
+
+        relayModel->clear();
+
+        return;
+    }
+
+    relayModel->setHeaderData(1, Qt::Horizontal, "Cable");
+    relayModel->setHeaderData(2, Qt::Horizontal, "Source Con");
+    relayModel->setHeaderData(3, Qt::Horizontal, "Source Pin");
+    relayModel->setHeaderData(4, Qt::Horizontal, "Relay Side Con");
+    relayModel->setHeaderData(5, Qt::Horizontal, "Relay Side Pins");
+    relayModel->setHeaderData(6, Qt::Horizontal, "Dest Con");
+    relayModel->setHeaderData(7, Qt::Horizontal, "Dest Pin");
+    relayModel->setHeaderData(8, Qt::Horizontal, "Excitation Voltage");
+    relayModel->setHeaderData(9, Qt::Horizontal, "Expected");
+
+    // Hide the internal database ID.
+    relayModel->setHeaderData(0, Qt::Horizontal, "ID");
+    ui->tableView_Relay->hideColumn(0);
+}
+
+
+void MainWindow::loadDiodeTable(const QString &tableName)
+{
+    diodeModel->setTable(tableName);
+
+    if (!diodeModel->select())
+    {
+        writeToNotes("Diode table unavailable: " + tableName);
+        diodeModel->clear();
+        return;
+    }
+
+    diodeModel->setHeaderData(1, Qt::Horizontal, "Cable");
+    diodeModel->setHeaderData(2, Qt::Horizontal, "Anode Con");
+    diodeModel->setHeaderData(3, Qt::Horizontal, "Anode Pin");
+    diodeModel->setHeaderData(4, Qt::Horizontal, "Cathode Con");
+    diodeModel->setHeaderData(5, Qt::Horizontal, "Cathode Pin");
+    diodeModel->setHeaderData(6, Qt::Horizontal, "Expected Voltage");
+
+    ui->tableView_diode->hideColumn(0);
+}
+
+QVector<QByteArray> MainWindow::constructUARTPacketsForDiode(
+    const QVector<QString> &sourceCon,
+    const QVector<QString> &sourcePin,
+    const QVector<QString> &destCon,
+    const QVector<QString> &destPin,
+    const QVector<QString> &expectedVoltage)
+{
+    QVector<QByteArray> packets;
+
+    constexpr int MAX_PACKET_SIZE = 1024;
+    constexpr int HEADER_SIZE = 6;
+    constexpr int ENTRY_SIZE = 12;
+
+    const int count = sourceCon.size();
+
+    if (sourcePin.size() != count ||
+        destCon.size() != count ||
+        destPin.size() != count ||
+        expectedVoltage.size() != count)
+    {
+        writeToNotes("Diode packet creation failed: vector sizes do not match.");
+        return {};
+    }
+
+    const int maxEntriesPerPacket =
+        (MAX_PACKET_SIZE - HEADER_SIZE) / ENTRY_SIZE;
+
+    quint16 packetNo = 1;
+
+    for (int start = 0; start < count; start += maxEntriesPerPacket)
+    {
+        QByteArray packet;
+
+        // Header: 2F 2F
+        packet.append(char(0x2F));
+        packet.append(char(0x2F));
+
+        // Packet number: MSB first
+        packet.append(char((packetNo >> 8) & 0xFF));
+        packet.append(char(packetNo & 0xFF));
+
+        // Reserve payload length
+        packet.append(char(0x00));
+        packet.append(char(0x00));
+
+        const int end = qMin(start + maxEntriesPerPacket, count);
+
+        for (int i = start; i < end; ++i)
+        {
+            // Validate connector format
+            if (!sourceCon[i].startsWith("TP-") ||
+                !destCon[i].startsWith("TP-"))
+            {
+                writeToNotes(
+                    QString("Invalid Diode connector at row %1: %2 -> %3")
+                    .arg(i + 1)
+                    .arg(sourceCon[i])
+                    .arg(destCon[i]));
+
+                return {};
+            }
+
+            // Parse expected voltage: 0.16-0.7V
+            static const QRegularExpression voltageRegex(
+                R"(^\s*(\d+(?:\.\d+)?)-(\d+(?:\.\d+)?)V\s*$)",
+                QRegularExpression::CaseInsensitiveOption);
+
+            QRegularExpressionMatch match =
+                voltageRegex.match(expectedVoltage[i]);
+
+            if (!match.hasMatch())
+            {
+                writeToNotes(
+                    QString("Invalid Diode voltage at row %1: %2")
+                    .arg(i + 1)
+                    .arg(expectedVoltage[i]));
+
+                return {};
+            }
+
+            bool minOk = false;
+            bool maxOk = false;
+
+            float vMin = match.captured(1).toFloat(&minOk);
+            float vMax = match.captured(2).toFloat(&maxOk);
+
+            if (!minOk || !maxOk || vMin > vMax)
+            {
+                writeToNotes(
+                    QString("Invalid voltage range at Diode row %1")
+                    .arg(i + 1));
+
+                return {};
+            }
+
+            quint8 srcCon = static_cast<quint8>(
+                sourceCon[i].section('-', 1, 1).toUInt());
+
+            quint8 srcPin =
+                static_cast<quint8>(sourcePin[i].toUInt());
+
+            quint8 dstCon = static_cast<quint8>(
+                destCon[i].section('-', 1, 1).toUInt());
+
+            quint8 dstPin =
+                static_cast<quint8>(destPin[i].toUInt());
+
+            // Connector/pin bytes
+            packet.append(char(srcCon));
+            packet.append(char(srcPin));
+            packet.append(char(dstCon));
+            packet.append(char(dstPin));
+
+            // Voltage floats: MSB first (big-endian)
+            // Explicit byte ordering avoids host-endian assumptions.
+            quint32 minBits;
+            quint32 maxBits;
+
+            static_assert(sizeof(float) == sizeof(quint32),
+                          "Expected 32-bit float");
+
+            memcpy(&minBits, &vMin, sizeof(float));
+            memcpy(&maxBits, &vMax, sizeof(float));
+
+            packet.append(char((minBits >> 24) & 0xFF));
+            packet.append(char((minBits >> 16) & 0xFF));
+            packet.append(char((minBits >> 8) & 0xFF));
+            packet.append(char(minBits & 0xFF));
+
+            packet.append(char((maxBits >> 24) & 0xFF));
+            packet.append(char((maxBits >> 16) & 0xFF));
+            packet.append(char((maxBits >> 8) & 0xFF));
+            packet.append(char(maxBits & 0xFF));
+        }
+
+        // Payload length excludes the six-byte header
+        const quint16 packetLength =
+            static_cast<quint16>(packet.size() - HEADER_SIZE);
+
+        packet[4] = char((packetLength >> 8) & 0xFF);
+        packet[5] = char(packetLength & 0xFF);
+
+        packets.append(packet);
+        ++packetNo;
+    }
+
+    writeToNotes(
+        QString("Diode packets constructed: %1")
+        .arg(packets.size()));
+
+    return packets;
+}
+
+QByteArray MainWindow::constructDiodeStartPacket(quint16 totalPackets)
+{
+    QByteArray packet;
+
+    packet.append(char(0x53));
+    packet.append(char(0x4B));
+    packet.append(char(0x3B));
+
+    // Total packet count (MSB first)
+    packet.append(char((totalPackets >> 8) & 0xFF));
+    packet.append(char(totalPackets & 0xFF));
+
+    // XOR checksum
+    quint8 checksum = 0;
+
+    for (char c : packet)
+        checksum ^= static_cast<quint8>(c);
+
+    packet.append(char(checksum));
+
+    writeToNotes(
+        QString("Diode start packet: %1")
+            .arg(QString(packet.toHex(' ').toUpper())));
+
+    return packet;
+}
+
+void MainWindow::populateDiodeTestTable(
+    const QVariantList &diode)
+{
+    // =====================================================
+    // Create model if it doesn't exist
+    // =====================================================
+
+    if (!m_diodeTestModel)
+    {
+        m_diodeTestModel = new QStandardItemModel(this);
+
+        ui->tableView_diodeTest->setModel(
+            m_diodeTestModel);
+    }
+
+    // =====================================================
+    // Clear previous data
+    // =====================================================
+
+    m_diodeTestModel->clear();
+
+    // =====================================================
+    // Set columns
+    // =====================================================
+
+    m_diodeTestModel->setColumnCount(9);
+
+    m_diodeTestModel->setHorizontalHeaderLabels({
+        "S.No",
+        "Loom",
+        "Source Conn (Anode)",
+        "Source Pin",
+        "Destination Conn (Cathode)",
+        "Destination Pin",
+        "Voltage Drop Across Diode (Min-Max)",
+        "Result",
+        "Remarks"
+    });
+
+    // =====================================================
+    // Make header text bold
+    // =====================================================
+
+    QFont headerFont =
+        ui->tableView_diodeTest->horizontalHeader()->font();
+
+    headerFont.setBold(true);
+
+    ui->tableView_diodeTest->horizontalHeader()->setFont(
+        headerFont);
+
+    // =====================================================
+    // Fill Diode data
+    // =====================================================
+
+    for (int row = 0; row < diode.size(); ++row)
+    {
+        QVariantMap data = diode[row].toMap();
+
+        // S.No
+        m_diodeTestModel->setItem(
+            row, 0,
+            new QStandardItem(QString::number(row + 1)));
+
+        // Loom (Cable)
+        m_diodeTestModel->setItem(
+            row, 1,
+            new QStandardItem(data["cable"].toString()));
+
+        // Source Connector (Anode)
+        m_diodeTestModel->setItem(
+            row, 2,
+            new QStandardItem(data["anodeCon"].toString()));
+
+        // Source Pin (Anode)
+        m_diodeTestModel->setItem(
+            row, 3,
+            new QStandardItem(data["anodePin"].toString()));
+
+        // Destination Connector (Cathode)
+        m_diodeTestModel->setItem(
+            row, 4,
+            new QStandardItem(data["cathodeCon"].toString()));
+
+        // Destination Pin (Cathode)
+        m_diodeTestModel->setItem(
+            row, 5,
+            new QStandardItem(data["cathodePin"].toString()));
+
+        // Expected Voltage Drop
+        m_diodeTestModel->setItem(
+            row, 6,
+            new QStandardItem(data["expVoltage"].toString()));
+
+        // Result - initially empty
+        m_diodeTestModel->setItem(
+            row, 7,
+            new QStandardItem(""));
+
+        // Remarks - initially empty
+        m_diodeTestModel->setItem(
+            row, 8,
+            new QStandardItem(""));
+    }
+
+    // =====================================================
+    // Table behavior
+    // =====================================================
+
+    ui->tableView_diodeTest->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+
+    ui->tableView_diodeTest->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+
+    ui->tableView_diodeTest->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+
+    ui->tableView_diodeTest->setAlternatingRowColors(true);
+
+    // =====================================================
+    // Column sizing
+    // =====================================================
+
+    ui->tableView_diodeTest->horizontalHeader()
+        ->setSectionResizeMode(QHeaderView::Stretch);
+
+    // =====================================================
+    // Row height
+    // =====================================================
+
+    ui->tableView_diodeTest->verticalHeader()
+            ->setDefaultSectionSize(28);
+}
+
+QVector<QByteArray> MainWindow::constructUARTPacketsForRelay(
+    const QVector<QString>& sourceCon,
+    const QVector<QString>& sourcePin,
+    const QVector<QString>& relaySideCon,
+    const QVector<QString>& relaySideRSPins,
+    const QVector<QString>& destCon,
+    const QVector<QString>& destPin,
+    const QVector<QString>& excitationVoltage,
+    const QVector<QString>& expected)
+{
+    QVector<QByteArray> packets;
+
+    constexpr int MAX_PACKET_SIZE = 1024;
+    constexpr int HEADER_SIZE = 6;
+    constexpr int MAX_INNER_LENGTH = 255;
+
+    const int rowCount = sourceCon.size();
+
+    // ---------------------------------------------------------
+    // 1. Validate vector sizes
+    // ---------------------------------------------------------
+    if (rowCount == 0 ||
+        sourcePin.size() != rowCount ||
+        relaySideCon.size() != rowCount ||
+        relaySideRSPins.size() != rowCount ||
+        destCon.size() != rowCount ||
+        destPin.size() != rowCount ||
+        excitationVoltage.size() != rowCount ||
+        expected.size() != rowCount)
+    {
+        writeToNotes("Relay packet error: Invalid or empty vectors.");
+        return {};
+    }
+
+    // ---------------------------------------------------------
+    // 2. Helper: encode a float as IEEE-754, MSB first
+    // ---------------------------------------------------------
+    auto appendFloatBE = [](QByteArray& data, float value)
+    {
+        quint32 bits = 0;
+        static_assert(sizeof(bits) == sizeof(value),
+                      "Float must be 32 bits");
+
+        memcpy(&bits, &value, sizeof(bits));
+
+        data.append(static_cast<char>((bits >> 24) & 0xFF));
+        data.append(static_cast<char>((bits >> 16) & 0xFF));
+        data.append(static_cast<char>((bits >> 8) & 0xFF));
+        data.append(static_cast<char>(bits & 0xFF));
+    };
+
+    // ---------------------------------------------------------
+    // 3. Helper: convert TP connector and pin to uint8
+    // ---------------------------------------------------------
+    auto parseEndpoint = [](const QString& connector,
+                            const QString& pin,
+                            quint8& connectorNumber,
+                            quint8& pinNumber) -> bool
+    {
+        const QRegularExpression connectorRegex(
+            R"(^TP-([0-9]+)(?:-|$))",
+            QRegularExpression::CaseInsensitiveOption);
+
+        const QRegularExpressionMatch match =
+            connectorRegex.match(connector.trimmed());
+
+        if (!match.hasMatch())
+            return false;
+
+        bool connectorOk = false;
+        bool pinOk = false;
+
+        const uint con =
+            match.captured(1).toUInt(&connectorOk);
+
+        const uint pinValue =
+            pin.trimmed().toUInt(&pinOk);
+
+        if (!connectorOk || !pinOk ||
+            con > 255 || pinValue > 255)
+        {
+            return false;
+        }
+
+        connectorNumber = static_cast<quint8>(con);
+        pinNumber = static_cast<quint8>(pinValue);
+
+        return true;
+    };
+
+    // ---------------------------------------------------------
+    // 4. Helper: parse coil Expected value as min-max resistance
+    //    Example: "400-600"
+    // ---------------------------------------------------------
+    auto parseResistanceRange = [](const QString& value,
+                                   quint16& minimum,
+                                   quint16& maximum) -> bool
+    {
+        static const QRegularExpression rangeRegex(
+            R"(^\s*(\d+)\s*-\s*(\d+)\s*$)");
+
+        const QRegularExpressionMatch match =
+            rangeRegex.match(value);
+
+        if (!match.hasMatch())
+            return false;
+
+        bool minOk = false;
+        bool maxOk = false;
+
+        const uint minValue = match.captured(1).toUInt(&minOk);
+        const uint maxValue = match.captured(2).toUInt(&maxOk);
+
+        if (!minOk || !maxOk ||
+            minValue > 65535 || maxValue > 65535 ||
+            minValue > maxValue)
+        {
+            return false;
+        }
+
+        minimum = static_cast<quint16>(minValue);
+        maximum = static_cast<quint16>(maxValue);
+
+        return true;
+    };
+
+    // ---------------------------------------------------------
+    // 5. Build complete Relay groups
+    // ---------------------------------------------------------
+    struct RelayGroup
+    {
+        quint8 relayId = 0;
+        QByteArray bytes;
+    };
+
+    QVector<RelayGroup> groups;
+
+    int row = 0;
+
+    while (row < rowCount)
+    {
+        const QRegularExpression relayRegex(
+            R"(^Relay_([1-9][0-9]*)(?:\s+.*)?$)",
+            QRegularExpression::CaseInsensitiveOption);
+
+        const QRegularExpressionMatch relayMatch =
+            relayRegex.match(relaySideCon[row].trimmed());
+
+        if (!relayMatch.hasMatch())
+        {
+            writeToNotes(QString("Relay packet error: Invalid relay name at row %1").arg(row));
+            return {};
+        }
+
+        bool relayIdOk = false;
+
+        const uint relayIdValue =
+            relayMatch.captured(1).toUInt(&relayIdOk);
+
+        if (!relayIdOk || relayIdValue > 255)
+        {
+            writeToNotes("Relay packet error: Relay ID exceeds uint8.");
+            return {};
+        }
+
+        const quint8 relayId =
+            static_cast<quint8>(relayIdValue);
+
+        const int groupStart = row;
+
+        // Gather consecutive rows belonging to this Relay_X.
+        while (row < rowCount)
+        {
+            const QRegularExpressionMatch currentMatch =
+                relayRegex.match(relaySideCon[row].trimmed());
+
+            if (!currentMatch.hasMatch())
+                return {};
+
+            bool currentIdOk = false;
+
+            const uint currentId =
+                currentMatch.captured(1).toUInt(&currentIdOk);
+
+            if (!currentIdOk)
+                return {};
+
+            if (currentId != relayIdValue)
+                break;
+
+            ++row;
+        }
+
+        const int groupEnd = row;
+
+        int xCoilRow = -1;
+        int yCoilRow = -1;
+
+        // -----------------------------------------------------
+        // Identify the coil rows and validate group contents
+        // -----------------------------------------------------
+        for (int i = groupStart; i < groupEnd; ++i)
+        {
+            const QString rsPins =
+                relaySideRSPins[i].trimmed().toUpper();
+
+            if (rsPins == "X1&X2")
+            {
+                if (xCoilRow != -1)
+                {
+                    writeToNotes(QString("Duplicate X1&X2 in Relay %1").arg(relayIdValue));
+                    return {};
+                }
+
+                xCoilRow = i;
+            }
+            else if (rsPins == "Y1&Y2")
+            {
+                if (yCoilRow != -1)
+                {
+                    writeToNotes(QString("Duplicate Y1&Y2 in Relay %1").arg(relayIdValue));
+                    return {};
+                }
+
+                yCoilRow = i;
+            }
+        }
+
+        // Every group must have its X1&X2 coil.
+        if (xCoilRow == -1)
+        {
+            writeToNotes(QString("Relay packet error: Missing X1&X2 in Relay %1").arg(relayIdValue));
+            return {};
+        }
+
+        const bool isLatch = (yCoilRow != -1);
+
+        // -----------------------------------------------------
+        // 6. Parse excitation voltage from the X1&X2 row
+        // -----------------------------------------------------
+        QString voltageText =
+            excitationVoltage[xCoilRow].trimmed();
+
+        if (voltageText.endsWith('V', Qt::CaseInsensitive))
+            voltageText.chop(1);
+
+        bool voltageOk = false;
+        const float voltage = voltageText.trimmed().toFloat(
+            &voltageOk);
+
+        if (!voltageOk || voltage <= 0.0f)
+        {
+            writeToNotes(QString("Relay packet error: Invalid excitation voltage %1")
+                         .arg(excitationVoltage[xCoilRow]));
+            return {};
+        }
+
+        // -----------------------------------------------------
+        // 7. Build the inner Relay data
+        // -----------------------------------------------------
+        QByteArray innerData;
+
+        auto appendCoil = [&](int coilRow) -> bool
+        {
+            quint8 srcConByte = 0;
+            quint8 srcPinByte = 0;
+            quint8 dstConByte = 0;
+            quint8 dstPinByte = 0;
+
+            if (!parseEndpoint(sourceCon[coilRow],
+                               sourcePin[coilRow],
+                               srcConByte,
+                               srcPinByte) ||
+                !parseEndpoint(destCon[coilRow],
+                               destPin[coilRow],
+                               dstConByte,
+                               dstPinByte))
+            {
+                writeToNotes(QString("Relay packet error: Invalid coil endpoints Relay: %1 row: %2")
+                             .arg(relayIdValue).arg(coilRow));
+                return false;
+            }
+
+            quint16 minResistance = 0;
+            quint16 maxResistance = 0;
+
+            if (!parseResistanceRange(expected[coilRow],
+                                      minResistance,
+                                      maxResistance))
+            {
+                writeToNotes(QString("Relay packet error: Invalid coil resistance range %1")
+                             .arg(expected[coilRow]));
+                return false;
+            }
+
+            innerData.append(static_cast<char>(srcConByte));
+            innerData.append(static_cast<char>(srcPinByte));
+            innerData.append(static_cast<char>(dstConByte));
+            innerData.append(static_cast<char>(dstPinByte));
+
+            // Minimum resistance: uint16, MSB first
+            innerData.append(static_cast<char>((minResistance >> 8) & 0xFF));
+            innerData.append(static_cast<char>(minResistance & 0xFF));
+
+            // Maximum resistance: uint16, MSB first
+            innerData.append(static_cast<char>((maxResistance >> 8) & 0xFF));
+            innerData.append(static_cast<char>(maxResistance & 0xFF));
+
+            return true;
+        };
+
+        // X1&X2 always comes first.
+        if (!appendCoil(xCoilRow))
+            return {};
+
+        // Y1&Y2 is present only for latch relays.
+        if (isLatch && !appendCoil(yCoilRow))
+            return {};
+
+        // Append all NO/NC contact rows without resistance floats.
+        for (int i = groupStart; i < groupEnd; ++i)
+        {
+            const QString rsPins =
+                relaySideRSPins[i].trimmed().toUpper();
+
+            if (rsPins == "X1&X2" || rsPins == "Y1&Y2")
+                continue;
+
+            quint8 srcConByte = 0;
+            quint8 srcPinByte = 0;
+            quint8 dstConByte = 0;
+            quint8 dstPinByte = 0;
+
+            if (!parseEndpoint(sourceCon[i],
+                               sourcePin[i],
+                               srcConByte,
+                               srcPinByte) ||
+                !parseEndpoint(destCon[i],
+                               destPin[i],
+                               dstConByte,
+                               dstPinByte))
+            {
+                writeToNotes(QString("Relay packet error: Invalid contact endpoints Relay: %1 row: %2")
+                             .arg(relayIdValue).arg(i));
+                return {};
+            }
+
+            innerData.append(static_cast<char>(srcConByte));
+            innerData.append(static_cast<char>(srcPinByte));
+            innerData.append(static_cast<char>(dstConByte));
+            innerData.append(static_cast<char>(dstPinByte));
+        }
+
+        // The inner data length is uint8. Never split a group.
+        if (innerData.size() > MAX_INNER_LENGTH)
+        {
+            writeToNotes(QString("Relay packet error: Inner data exceeds 255 bytes. Relay: %1 Length: %2")
+                         .arg(relayIdValue).arg(innerData.size()));
+            return {};
+        }
+
+        // -----------------------------------------------------
+        // 8. Build the Relay group record
+        // -----------------------------------------------------
+        RelayGroup group;
+        group.relayId = relayId;
+
+        group.bytes.append(static_cast<char>(relayId));
+
+        group.bytes.append(
+            static_cast<char>(isLatch ? 0xAE : 0xEA));
+
+        appendFloatBE(group.bytes, voltage);
+
+        group.bytes.append(
+            static_cast<char>(innerData.size()));
+
+        group.bytes.append(innerData);
+
+        groups.append(group);
+
+        writeToNotes(
+            QString("Relay group built: ID = %1, Type = %2, Inner length = %3")
+                .arg(relayIdValue)
+                .arg(isLatch ? "Latch" : "Non-latch")
+                .arg(innerData.size()));
+
+        writeToNotes(
+            QString("Relay %1 Inner Data (HEX): %2")
+                .arg(relayIdValue)
+                .arg(QString::fromLatin1(innerData.toHex(' ').toUpper())));
+
+        writeToNotes(
+            QString("Relay %1 Complete Group Bytes (HEX): %2")
+                .arg(relayIdValue)
+                .arg(QString::fromLatin1(group.bytes.toHex(' ').toUpper())));
+    }
+
+    // ---------------------------------------------------------
+    // 9. Pack complete Relay groups into outer packets
+    // ---------------------------------------------------------
+    QByteArray payload;
+    quint16 packetNo = 1;
+    int groupsInPacket = 0;
+
+    auto finalizePacket = [&]()
+    {
+        if (groupsInPacket == 0)
+            return;
+
+        QByteArray packet;
+
+        // Header: 2F 2F
+        packet.append(static_cast<char>(0x2F));
+        packet.append(static_cast<char>(0x2F));
+
+        // Packet number, uint16 MSB first.
+        packet.append(static_cast<char>((packetNo >> 8) & 0xFF));
+        packet.append(static_cast<char>(packetNo & 0xFF));
+
+        // Payload length, uint16 MSB first; excludes 6-byte header.
+        const quint16 dataLength =
+            static_cast<quint16>(payload.size());
+
+        packet.append(static_cast<char>((dataLength >> 8) & 0xFF));
+        packet.append(static_cast<char>(dataLength & 0xFF));
+
+        packet.append(payload);
+
+        if (packet.size() > MAX_PACKET_SIZE)
+        {
+            writeToNotes("Relay packet error: Outer packet exceeds 1024 bytes.");
+            packets.clear();
+            return;
+        }
+
+        packets.append(packet);
+
+        writeToNotes(QString("Relay packet: Packet No = %1 Groups = %2 Data length = %3 Total bytes = %4")
+                     .arg(packetNo)
+                     .arg(groupsInPacket)
+                     .arg(dataLength)
+                     .arg(packet.size()));
+
+        ++packetNo;
+        payload.clear();
+        groupsInPacket = 0;
+    };
+
+    for (const RelayGroup& group : groups)
+    {
+        const int projectedSize =
+            HEADER_SIZE + payload.size() + group.bytes.size();
+
+        if (groupsInPacket > 0 &&
+            projectedSize > MAX_PACKET_SIZE)
+        {
+            finalizePacket();
+
+            // Abort if packet finalization detected an error.
+            if (packets.isEmpty())
+                return {};
+        }
+
+        // A single complete group must fit in one outer packet.
+        if (HEADER_SIZE + group.bytes.size() > MAX_PACKET_SIZE)
+        {
+            writeToNotes("Relay packet error: Single group cannot fit.");
+            return {};
+        }
+
+        payload.append(group.bytes);
+        ++groupsInPacket;
+    }
+
+    finalizePacket();
+
+    if (packets.isEmpty())
+        return {};
+
+    writeToNotes(QString("Total Relay packets generated: %1").arg(packets.size()));
+
+    return packets;
+}
+
+
+QByteArray MainWindow::constructRelayStartPacket(
+    quint8 totalRelays,
+    quint16 totalPackets)
+{
+    QByteArray packet;
+
+    packet.append(char(0x53));
+    packet.append(char(0x4B));
+    packet.append(char(0x3A));
+
+    // Number of relays (uint8)
+    packet.append(char(totalRelays));
+
+    // Total packet count (uint16, MSB first)
+    packet.append(char((totalPackets >> 8) & 0xFF));
+    packet.append(char(totalPackets & 0xFF));
+
+    // XOR checksum of all preceding bytes
+    quint8 checksum = 0;
+
+    for (char c : packet)
+        checksum ^= static_cast<quint8>(c);
+
+    packet.append(char(checksum));
+
+    writeToNotes(
+        QString("Relay start packet: %1")
+            .arg(QString(packet.toHex(' ').toUpper())));
+
+    return packet;
+}
+
+
+void MainWindow::populateRelayTestTable(
+    const QVariantList &relayData)
+{
+    if (!m_relayTestModel)
+    {
+        m_relayTestModel = new QStandardItemModel(this);
+    }
+
+    m_relayTestModel->clear();
+
+    m_relayTestModel->setColumnCount(14);
+
+    m_relayTestModel->setHorizontalHeaderLabels({
+        "S.No",
+        "Cable",
+        "Source Connector",
+        "Source Pin",
+        "Relay Connector",
+        "Relay Pins",
+        "Destination Connector",
+        "Destination Pin",
+        "Excitation Voltage",
+        "Expected",
+        "Condition",
+        "Measured Value",
+        "Results",
+        "Remarks"
+    });
+
+    // Attach the model to the Relay table.
+    ui->tableView_relay->setModel(m_relayTestModel);
+
+    // Keep columns readable; allow horizontal scrolling.
+    ui->tableView_relay->horizontalHeader()
+        ->setSectionResizeMode(QHeaderView::Interactive);
+
+    ui->tableView_relay->setHorizontalScrollMode(
+        QAbstractItemView::ScrollPerPixel);
+
+    // Set practical initial column widths.
+    const int columnWidths[] = {
+        55, 100, 240, 85, 260, 100, 240,
+        100, 130, 100, 100, 130, 100, 180
+    };
+
+    for (int col = 0; col < 14; ++col)
+    {
+        ui->tableView_relay->setColumnWidth(
+            col, columnWidths[col]);
+    }
+
+    int serialNumber = 1;
+    int start = 0;
+
+    // Database rows are already ordered by Relay group.
+    while (start < relayData.size())
+    {
+        const QVariantMap firstMap =
+            relayData[start].toMap();
+
+        const QString relayName =
+            firstMap["relaySideCon"].toString().simplified();
+
+        // Find the end of this contiguous Relay group.
+        int end = start + 1;
+
+        while (end < relayData.size())
+        {
+            const QString nextRelay =
+                relayData[end].toMap()["relaySideCon"]
+                    .toString().simplified();
+
+            if (nextRelay != relayName)
+                break;
+
+            ++end;
+        }
+
+        // Add every database row for OFF, then every row for ON.
+        const QString conditions[] = {"OFF", "ON"};
+
+        for (const QString &condition : conditions)
+        {
+            for (int i = start; i < end; ++i)
+            {
+                const QVariantMap m =
+                    relayData[i].toMap();
+
+                // Determine whether this is a coil row
+                const QString relayPins =
+                    m["relaySideRSPins"].toString().simplified();
+
+                const bool isCoil =
+                    relayPins.compare("X1&X2", Qt::CaseInsensitive) == 0 ||
+                    relayPins.compare("Y1&Y2", Qt::CaseInsensitive) == 0;
+
+                // Set expected value according to Relay condition
+                QString expectedValue = m["exp"].toString();
+
+                if (!isCoil)
+                {
+                    if (condition == "OFF")
+                        expectedValue = "<2";
+                    else if (condition == "ON")
+                        expectedValue = ">2";
+                }
+
+                QStringList values = {
+                    QString::number(serialNumber++),
+                    m["cable"].toString(),
+                    m["sourceCon"].toString(),
+                    m["sourcePin"].toString(),
+                    m["relaySideCon"].toString(),
+                    m["relaySideRSPins"].toString(),
+                    m["destCon"].toString(),
+                    m["destPin"].toString(),
+                    m["excitationVoltage"].toString(),
+                    expectedValue,
+                    condition,
+                    "",     // Measured Value
+                    "",     // Results
+                    ""      // Remarks
+                };
+
+                QList<QStandardItem *> rowItems;
+
+                for (const QString &value : values)
+                {
+                    QStandardItem *item =
+                        new QStandardItem(value);
+
+                    item->setEditable(false);
+                    rowItems.append(item);
+                }
+
+                m_relayTestModel->appendRow(rowItems);
+            }
+        }
+
+        start = end;
+    }
+
+    // Row selection and readable display.
+    ui->tableView_relay->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+
+    // Single-row selection
+    ui->tableView_relay->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+
+    // Disable editing
+    ui->tableView_relay->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+
+    ui->tableView_relay->setAlternatingRowColors(true);
+    ui->tableView_relay->verticalHeader()
+        ->setSectionResizeMode(QHeaderView::ResizeToContents);
+
+    writeToNotes(
+        QString("Relay table populated: %1 database rows, "
+                "%2 display rows.")
+            .arg(relayData.size())
+            .arg(m_relayTestModel->rowCount()));
+}
+
+
 
 void MainWindow::onPortSelected(const QString &portName)
 {
@@ -4062,8 +6636,9 @@ void MainWindow::on_pushButton_run_clicked()
     QString cableName = ui->comboBox_files->currentText();
 
     QVariantList patch = getPatchData(cableName);
-
     QVariantList harness = getHarnessData(cableName);
+    QVariantList diode   = getDiodeData(cableName);
+    QVariantList relay   = getRelayData(cableName);
 
     if(patch.length() ==0||harness.length()==0)
     {
@@ -4093,6 +6668,246 @@ void MainWindow::on_pushButton_run_clicked()
         return;
     }
 
+
+    // -------------------------------------------------
+    // Diode Test BLOCK Start
+    // -------------------------------------------------
+    if (ui->comboBox_test->currentText() == "Diode")
+    {
+        if (patch.isEmpty() || diode.isEmpty())
+        {
+            QMessageBox::information(
+                this,
+                "Data Missing",
+                "No Patch/Diode data found for this cable!");
+            return;
+        }
+
+        if (!test->mapDiodeToHardware(patch, diode))
+        {
+            QMessageBox::warning(
+                this, "Error", "Patch to Diode mapping failed.");
+            return;
+        }
+
+        QVector<QByteArray> packets =
+            constructUARTPacketsForDiode(
+                test->m_diodeAnodeCon,
+                test->m_diodeAnodePin,
+                test->m_diodeCathodeCon,
+                test->m_diodeCathodePin,
+                test->m_diodeExpVoltage);
+
+        if (packets.isEmpty())
+        {
+            QMessageBox::warning(
+                this, "Error",
+                "Failed to construct Diode packets.");
+            return;
+        }
+
+        // ------------------------------------
+        // Print Diode Data Packets
+        // ------------------------------------
+        writeToNotes("========== DIODE DATA PACKETS ==========");
+
+        for (int i = 0; i < packets.size(); ++i)
+        {
+            writeToNotes(
+                QString("Diode Packet %1 | Size: %2 bytes | HEX: %3")
+                    .arg(i + 1)
+                    .arg(packets[i].size())
+                    .arg(QString(packets[i].toHex(' ').toUpper())));
+        }
+
+        QByteArray startPacket =
+            constructDiodeStartPacket(
+                static_cast<quint16>(packets.size()));
+
+        //Table Filling and Reset State
+        // -----------------------------------------
+        // Populate result table FIRST
+        // -----------------------------------------
+
+        populateDiodeTestTable(diode);
+
+        // -----------------------------------------
+        // Get expected result count
+        // -----------------------------------------
+
+        int expectedDiodeResults =
+            m_diodeTestModel->rowCount();
+
+        // -----------------------------------------
+        // Reset progress bar
+        // -----------------------------------------
+
+        ui->progressBar_DiodeTest->setValue(0);
+
+        ui->progressBar_DiodeTest->setMaximum(
+            expectedDiodeResults);
+
+        // -----------------------------------------
+        // Move to Diode test page
+        // -----------------------------------------
+
+        ui->stackedWidget->setCurrentWidget(
+            ui->page_diodeTest);
+
+        ui->label_test_Diode->setText("Diode Test");
+
+        // ------------------------------------
+        // Send Start Packet and begin ACK flow
+        // ------------------------------------
+        test->startDiodeTransmission(startPacket, packets);
+
+    }
+    // -------------------------------------------------
+    // Diode Test BLOCK End
+    // -------------------------------------------------
+
+    // -------------------------------------------------
+    // Relay Test BLOCK Start
+    // -------------------------------------------------
+    if (ui->comboBox_test->currentText() == "Relay")
+    {
+        if (patch.isEmpty() || relay.isEmpty())
+        {
+            QMessageBox::information(
+                this,
+                "Data Missing",
+                "No Patch/Relay data found for this cable!");
+            return;
+        }
+
+
+        if (!test->mapRelayToHardware(patch, relay))
+        {
+            QMessageBox::warning(
+                this, "Error", "Patch to Relay mapping failed.");
+            return;
+        }
+
+        QVector<QByteArray> relayPackets =
+            constructUARTPacketsForRelay(
+                test->m_relaySourceCon,
+                test->m_relaySourcePin,
+                test->m_relaySideCon,
+                test->m_relaySideRSPins,
+                test->m_relayDestCon,
+                test->m_relayDestPin,
+                test->m_relayExcitationVoltage,
+                test->m_relayExp);
+
+        if (relayPackets.isEmpty())
+        {
+            QMessageBox::warning(
+                this,
+                "Relay Packet Error",
+                "Failed to construct Relay UART packets. Check the debug output.");
+            return;
+        }
+
+        // ---------------------------------------------------------
+        // Print our precious Relay packets
+        // ---------------------------------------------------------
+        writeToNotes(
+            QString("========== RELAY PACKETS GENERATED: %1 ==========")
+                .arg(relayPackets.size()));
+
+        for (int i = 0; i < relayPackets.size(); ++i)
+        {
+            const QByteArray &packet = relayPackets[i];
+
+            const QString hexData =
+                QString::fromLatin1(packet.toHex(' ').toUpper());
+
+            writeToNotes(
+                QString("Relay Packet %1 | Size: %2 bytes")
+                    .arg(i + 1)
+                    .arg(packet.size()));
+
+            writeToNotes(hexData);
+
+            qDebug().noquote()
+                << QString("Relay Packet %1 (%2 bytes): %3")
+                       .arg(i + 1)
+                       .arg(packet.size())
+                       .arg(hexData);
+        }
+
+        writeToNotes("========== END OF RELAY PACKETS ==========");
+
+        // Count distinct Relay IDs (Relay_1, Relay_2, Relay_3, etc.)
+        QSet<QString> relayIds;
+
+        for (const QString &relayName : test->m_relaySideCon)
+        {
+            QRegularExpression re(
+                R"(^Relay_([1-9][0-9]*)(?:\s+.*)?$)",
+                QRegularExpression::CaseInsensitiveOption);
+
+            const QRegularExpressionMatch match =
+                re.match(relayName.trimmed());
+
+            if (match.hasMatch())
+                relayIds.insert(match.captured(1));
+        }
+
+        const quint8 totalRelays =
+            static_cast<quint8>(relayIds.size());
+
+        QByteArray startPacket =
+            constructRelayStartPacket(
+                totalRelays,
+                static_cast<quint16>(relayPackets.size()));
+
+
+        // -----------------------------------------
+        // Table Filling and Reset State
+        // -----------------------------------------
+
+        // Populate Relay result table FIRST.
+        populateRelayTestTable(relay);
+
+        m_relayMeasuredValues.clear();
+        m_relayMeasuredValues.resize(m_relayTestModel->rowCount());
+
+        // -----------------------------------------
+        // Get expected result count
+        // -----------------------------------------
+
+        int expectedRelayResults =
+            m_relayTestModel->rowCount();
+
+        // -----------------------------------------
+        // Reset progress bar
+        // -----------------------------------------
+
+        ui->progressBar_RelayTest->setValue(0);
+
+        ui->progressBar_RelayTest->setMaximum(
+            expectedRelayResults);
+
+        // -----------------------------------------
+        // Move to Relay test page
+        // -----------------------------------------
+
+        ui->stackedWidget->setCurrentWidget(
+            ui->page_relayTest);
+
+        ui->label_test_Relay->setText("Relay Test");
+
+        test->setRelayExpectedResults(m_relayTestModel->rowCount());
+        // ------------------------------------
+        // Send Start Packet and begin ACK flow
+        // ------------------------------------
+        test->startRelayTransmission(startPacket, relayPackets);
+
+    }
+    // -------------------------------------------------
+    // Relay Test BLOCK End
+    // -------------------------------------------------
 
     // Two Wire BLOCK Start------------------------
 
@@ -4651,6 +7466,119 @@ QVariantList MainWindow::getHarnessData(const QString &cableName)
 
     return rows;
 }
+
+QVariantList MainWindow::getDiodeData(const QString &cableName)
+{
+    QVariantList rows;
+
+    if (!db.isOpen()) {
+        writeToNotes("getDiodeData: DB not open");
+        return rows;
+    }
+
+    QString tableName = cableName + "_diode";
+
+    if (!db.tables().contains(tableName)) {
+        writeToNotes("getDiodeData: Table not found → " + tableName);
+        return rows;
+    }
+
+    QString sql =
+        "SELECT cable, anodeCon, anodePin, "
+        "cathodeCon, cathodePin, expVoltage "
+        "FROM " + tableName;
+
+    QSqlQuery q(db);
+
+    if (!q.exec(sql)) {
+        writeToNotes("getDiodeData: query failed → " +
+                     q.lastError().text());
+        return rows;
+    }
+
+    while (q.next()) {
+        QVariantMap m;
+
+        m["cable"]       = q.value(0).toString();
+        m["anodeCon"]    = q.value(1).toString();
+        m["anodePin"]    = q.value(2).toString();
+        m["cathodeCon"]  = q.value(3).toString();
+        m["cathodePin"]  = q.value(4).toString();
+        m["expVoltage"]  = q.value(5).toString();
+
+        rows.append(m);
+    }
+
+    writeToNotes(QString("getDiodeData: %1 rows for %2")
+                 .arg(rows.size())
+                 .arg(cableName));
+
+    return rows;
+}
+
+
+QVariantList MainWindow::getRelayData(const QString &cableName)
+{
+    QVariantList rows;
+
+    if (!db.isOpen())
+    {
+        writeToNotes("getRelayData: DB not open");
+        return rows;
+    }
+
+    const QString tableName = cableName + "_relay";
+
+    if (!db.tables().contains(tableName))
+    {
+        writeToNotes("getRelayData: Table not found -> " + tableName);
+        return rows;
+    }
+
+    const QString sql =
+        QString(
+            "SELECT cable, sourceCon, sourcePin, "
+            "relaySideCon, relaySideRSPins, "
+            "destCon, destPin, excitationVoltage, exp "
+            "FROM \"%1\"")
+            .arg(tableName);
+
+    QSqlQuery q(db);
+
+    if (!q.exec(sql))
+    {
+        writeToNotes(
+            "getRelayData: query failed -> " +
+            q.lastError().text());
+
+        return rows;
+    }
+
+    while (q.next())
+    {
+        QVariantMap m;
+
+        m["cable"]             = q.value(0).toString();
+        m["sourceCon"]         = q.value(1).toString();
+        m["sourcePin"]         = q.value(2).toString();
+        m["relaySideCon"]      = q.value(3).toString();
+        m["relaySideRSPins"]   = q.value(4).toString();
+        m["destCon"]           = q.value(5).toString();
+        m["destPin"]           = q.value(6).toString();
+        m["excitationVoltage"] = q.value(7).toString();
+        m["exp"]               = q.value(8).toString();
+
+        rows.append(m);
+    }
+
+    writeToNotes(
+        QString("getRelayData: %1 rows for %2")
+            .arg(rows.size())
+            .arg(cableName));
+
+    return rows;
+}
+
 
 
 void MainWindow::on_pushButton_back_clicked()
@@ -7362,4 +10290,121 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
                 this,
                 "PDF",
                 "Self-test PDF saved successfully:\n" + fileName);
+}
+
+void MainWindow::on_pushButton_stopDiodeTest_clicked()
+{
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Diode Test",
+                "Are you sure you want to abort the Diode test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
+}
+
+void MainWindow::on_pushButton_backFromDiodeTest_clicked()
+{
+    if (test->isDiodeTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Diode Test",
+            "Please wait, Diode test is running.");
+        return;
+    }
+
+    ui->stackedWidget->setCurrentWidget(ui->page_test);
+}
+
+void MainWindow::on_pushButton_saveDiodeTest_clicked()
+{
+    if (test->isDiodeTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Diode Test",
+            "Please wait, Diode test is running.");
+        return;
+    }
+
+    // Add Save functionality here
+}
+
+void MainWindow::on_pushButton_openDiodeTest_clicked()
+{
+    if (test->isDiodeTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Diode Test",
+            "Please wait, Diode test is running.");
+        return;
+    }
+
+    // Add Open Files functionality here
+}
+
+
+void MainWindow::on_pushButton_stopRelayTest_clicked()
+{
+    QMessageBox::StandardButton reply =
+            QMessageBox::question(
+                this,
+                "Abort Relay Test",
+                "Are you sure you want to abort the Relay test?",
+                QMessageBox::Yes |
+                QMessageBox::No);
+
+    if (reply == QMessageBox::Yes)
+    {
+        test->abortCommand();
+    }
+}
+
+void MainWindow::on_pushButton_saveRelayTest_clicked()
+{
+    if (test->isRelayTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Relay Test",
+            "Please wait, Relay test is running.");
+        return;
+    }
+
+    // Add Save functionality here
+}
+
+void MainWindow::on_pushButton_openRelayTest_clicked()
+{
+    if (test->isRelayTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Relay Test",
+            "Please wait, Relay test is running.");
+        return;
+    }
+
+    // Add Open Files functionality here
+}
+
+void MainWindow::on_pushButton_backFromRelayTest_clicked()
+{
+    if (test->isRelayTestRunning())
+    {
+        QMessageBox::warning(
+            this,
+            "Relay Test",
+            "Please wait, Relay test is running.");
+        return;
+    }
+
+    ui->stackedWidget->setCurrentWidget(ui->page_test);
 }

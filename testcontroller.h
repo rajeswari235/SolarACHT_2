@@ -108,11 +108,6 @@ public:
         return m_receivingInsulationResults;
     }
 
-    void setCurrentInsulationTotalNets(int totalNets)
-    {
-        m_currentInsulationTotalNets = totalNets;
-    }
-
     void setInsulationLoomNetCounts(const QVector<int> &netCounts)
     {
         m_insulationNetsPerLoom = netCounts;
@@ -128,6 +123,68 @@ public:
 
     //Abort Command
     void abortCommand();
+
+    // Diode Test
+    bool mapDiodeToHardware(
+        const QVariantList &patchData,
+        const QVariantList &diodeData);
+
+    QVector<QString> m_diodeCable;
+    QVector<QString> m_diodeAnodeCon;
+    QVector<QString> m_diodeAnodePin;
+    QVector<QString> m_diodeCathodeCon;
+    QVector<QString> m_diodeCathodePin;
+    QVector<QString> m_diodeExpVoltage;
+
+    void startDiodeTransmission(
+        const QByteArray &startPacket,
+        const QVector<QByteArray> &packets);
+
+    bool isDiodeTestRunning() const
+    {
+        return m_waitingForDiodeStartAck ||
+               m_waitingForDiodePacketAck ||
+               m_waitingForDiodeResults;
+    }
+
+    //Relay Test
+    bool mapRelayToHardware(
+        const QVariantList &patchData,
+        const QVariantList &relayData);
+
+    QVector<QString> m_relayCable;
+
+    QVector<QString> m_relaySourceCon;
+    QVector<QString> m_relaySourcePin;
+
+    QVector<QString> m_relaySideCon;
+    QVector<QString> m_relaySideRSPins;
+
+    QVector<QString> m_relayDestCon;
+    QVector<QString> m_relayDestPin;
+
+    QVector<QString> m_relayExcitationVoltage;
+    QVector<QString> m_relayExp;
+
+    void startRelayTransmission(
+        const QByteArray &startPacket,
+        const QVector<QByteArray> &packets);
+
+    void processRelayResultBuffer();
+
+    void setRelayExpectedResults(int count)
+    {
+        m_relayExpectedResults = count;
+        m_relayResultIndex = 0;
+    }
+
+    bool isRelayTestRunning() const
+    {
+        return m_waitingForRelayStartAck ||
+               m_waitingForRelayPacketAck ||
+               m_waitingForRelayResults;
+    }
+
 
 private slots:
     void onReadyRead();
@@ -177,6 +234,16 @@ signals:
     void insulationResultsCompleted();
 
     void insulationNetMarkerReceived(int loomNo, int totalNets);
+
+    //Diode Test Signals ---------------------------
+    void diodeResultReceived(int row, const QString &result);
+    void diodeResultsCompleted();
+
+    //Relay Test Signals ---------------------------
+    void relayResultReceived(int row, float measuredValue);
+    void relayResultsCompleted();
+
+
 
 
 private:
@@ -234,13 +301,37 @@ private:
 
     QVector<float> m_insulationResults;
 
-    QByteArray m_currentInsulationLoomData;
+    // Progress bar logic
     int m_currentInsulationLoom = 0;
-
-    int m_currentInsulationTotalNets = 0;
     int m_insulationNetMarkersSeen = 0;
-
     QVector<int> m_insulationNetsPerLoom;
+
+    //Diode Test
+    // Diode transmission state
+    QVector<QByteArray> m_diodePackets;
+    int m_currentDiodePacket = 0;
+
+    bool m_waitingForDiodeStartAck = false;
+    bool m_waitingForDiodePacketAck = false;
+    bool m_waitingForDiodeResults = false;
+
+    int m_diodeResultsReceived = 0;
+
+    //Relay Test
+    QVector<QByteArray> m_relayPackets;
+    int m_currentRelayPacket = 0;
+
+    bool m_waitingForRelayStartAck = false;
+    bool m_waitingForRelayPacketAck = false;
+    bool m_waitingForRelayResults = false;
+
+    int m_relayResultsReceived = 0;
+
+
+    QByteArray m_relayResultBuffer;
+    int m_relayResultIndex = 0;
+
+    int m_relayExpectedResults = 0;
 
 };
 

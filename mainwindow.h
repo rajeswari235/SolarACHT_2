@@ -119,6 +119,81 @@ public:
          const QString &hardwareCon,
          int hardwarePin);
 
+     //Diode Test
+     bool validateDiodeData(
+         const QVector<QString> &cableTemp,
+         const QVector<QString> &anodeConTemp,
+         const QVector<QString> &anodePinTemp,
+         const QVector<QString> &cathodeConTemp,
+         const QVector<QString> &cathodePinTemp,
+         const QVector<QString> &expVoltageTemp);
+
+     bool saveDiodeToDb(
+         const QString &cableName,
+         const QVector<QString> &cableTemp,
+         const QVector<QString> &anodeConTemp,
+         const QVector<QString> &anodePinTemp,
+         const QVector<QString> &cathodeConTemp,
+         const QVector<QString> &cathodePinTemp,
+         const QVector<QString> &expVoltageTemp);
+
+     bool validateRelayData(
+         const QVector<QString> &cableTemp,
+         const QVector<QString> &sourceConTemp,
+         const QVector<QString> &sourcePinTemp,
+         const QVector<QString> &relaySideConTemp,
+         const QVector<QString> &relaySideRSPinsTemp,
+         const QVector<QString> &destConTemp,
+         const QVector<QString> &destPinTemp,
+         const QVector<QString> &excitationVoltageTemp,
+         const QVector<QString> &expTemp);
+
+
+     bool saveRelayToDb(
+         const QString &cableName,
+         const QVector<QString> &cableTemp,
+         const QVector<QString> &sourceConTemp,
+         const QVector<QString> &sourcePinTemp,
+         const QVector<QString> &relaySideConTemp,
+         const QVector<QString> &relaySideRSPinsTemp,
+         const QVector<QString> &destConTemp,
+         const QVector<QString> &destPinTemp,
+         const QVector<QString> &excitationVoltageTemp,
+         const QVector<QString> &expTemp);
+
+
+     void loadRelayTable(const QString &tableName);
+
+     void loadDiodeTable(const QString &tableName);
+
+     QVector<QByteArray> constructUARTPacketsForDiode(
+         const QVector<QString> &sourceCon,
+         const QVector<QString> &sourcePin,
+         const QVector<QString> &destCon,
+         const QVector<QString> &destPin,
+         const QVector<QString> &expectedVoltage);
+
+     QByteArray constructDiodeStartPacket(quint16 totalPackets);
+
+     void populateDiodeTestTable(const QVariantList &diode);
+
+     //Relay Test
+     QVector<QByteArray> constructUARTPacketsForRelay(
+         const QVector<QString>& sourceCon,
+         const QVector<QString>& sourcePin,
+         const QVector<QString>& relaySideCon,
+         const QVector<QString>& relaySideRSPins,
+         const QVector<QString>& destCon,
+         const QVector<QString>& destPin,
+         const QVector<QString>& excitationVoltage,
+         const QVector<QString>& expected);
+
+     QByteArray constructRelayStartPacket(
+         quint8 totalRelays,
+         quint16 totalPackets);
+
+     void populateRelayTestTable(const QVariantList &relayData);
+
 private slots:
      void on_pushButton_Save_clicked();
 
@@ -223,6 +298,10 @@ private slots:
 
       QVariantList getHarnessData(const QString &cableName);
 
+      QVariantList getDiodeData(const QString &cableName);
+
+      QVariantList getRelayData(const QString &cableName);
+
       void on_pushButton_back_clicked();
 
       void on_pushButton_addRow_clicked();
@@ -301,6 +380,7 @@ private slots:
 
       void on_pushButton_openInsuIsoFiles_clicked();
 
+<<<<<<< HEAD
       void drawInsoIsoTable( QPainter &painter,
                              QPrinter &printer,
                              qreal pageWidth,
@@ -321,6 +401,24 @@ private slots:
               int &pageNumber);
 
       void on_pushButton_selfTestSave_clicked();
+=======
+      void on_pushButton_stopDiodeTest_clicked();
+
+      void on_pushButton_backFromDiodeTest_clicked();
+
+      void on_pushButton_saveDiodeTest_clicked();
+
+      void on_pushButton_openDiodeTest_clicked();
+
+
+      void on_pushButton_stopRelayTest_clicked();
+
+      void on_pushButton_saveRelayTest_clicked();
+
+      void on_pushButton_openRelayTest_clicked();
+
+      void on_pushButton_backFromRelayTest_clicked();
+>>>>>>> upstream/main
 
 public slots:
 
@@ -371,6 +469,14 @@ public slots:
 
        void onInsulationNetMarkerReceived(int loomNo, int totalNets);
 
+       // Relay Test
+       void onRelayResultReceived(int row, float measuredValue);
+       void onRelayResultsCompleted();
+
+       bool checkRelayExpected(
+              float measuredOhms,
+              const QString &expected);
+
 
 
 
@@ -399,6 +505,8 @@ private:
 
     QSqlTableModel *patchModel;
     QSqlTableModel *harnessModel;
+    QSqlTableModel *relayModel;
+    QSqlTableModel *diodeModel;
 
     TestController *test;
     bool simulate;
@@ -427,6 +535,14 @@ private:
     int totalInsulationLooms = 0;
 
     double currentLoomNetProgress = 0.0;
+
+    //Diode Test table filling
+    QStandardItemModel *m_diodeTestModel = nullptr;
+
+    //Relay Test table filling
+    QStandardItemModel *m_relayTestModel = nullptr;
+    QVector<float> m_relayMeasuredValues;
+
 };
 
 #endif // MAINWINDOW_H
