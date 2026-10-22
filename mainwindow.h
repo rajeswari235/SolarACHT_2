@@ -39,6 +39,8 @@
 #include <QImage>
 #include <QBuffer>
 
+#include <QDesktopServices>
+
 QT_BEGIN_NAMESPACE
 namespace Ui { class MainWindow; }
 QT_END_NAMESPACE
@@ -380,7 +382,6 @@ private slots:
 
       void on_pushButton_openInsuIsoFiles_clicked();
 
-<<<<<<< HEAD
       void drawInsoIsoTable( QPainter &painter,
                              QPrinter &printer,
                              qreal pageWidth,
@@ -388,6 +389,7 @@ private slots:
                              qreal bottom,
                              qreal &y,
                              int &pageNumber);
+
       void generateInsoIsoPDF();
       void generateCalibratePDF();
 
@@ -401,24 +403,41 @@ private slots:
               int &pageNumber);
 
       void on_pushButton_selfTestSave_clicked();
-=======
+
       void on_pushButton_stopDiodeTest_clicked();
-
       void on_pushButton_backFromDiodeTest_clicked();
-
       void on_pushButton_saveDiodeTest_clicked();
-
       void on_pushButton_openDiodeTest_clicked();
 
-
       void on_pushButton_stopRelayTest_clicked();
-
       void on_pushButton_saveRelayTest_clicked();
-
       void on_pushButton_openRelayTest_clicked();
-
       void on_pushButton_backFromRelayTest_clicked();
->>>>>>> upstream/main
+
+
+      void  generateDiodeTestPDF();
+
+      void drawDiodeTestTable(
+              QPainter &painter,
+              QPrinter &printer,
+              qreal pageWidth,
+              qreal pageHeight,
+              qreal bottom,
+              qreal &y,
+              int &pageNumber);
+
+       void generateRelayTestPDF();
+       void drawRelayTestTable(
+               QPainter &painter,
+               QPrinter &printer,
+               qreal pageWidth,
+               qreal pageHeight,
+               qreal bottom,
+               qreal &y,
+               int &pageNumber);
+
+
+       void on_pushButton_openTwoWireFiles_clicked();
 
 public slots:
 
@@ -476,6 +495,7 @@ public slots:
        bool checkRelayExpected(
               float measuredOhms,
               const QString &expected);
+
 
 
 
@@ -542,6 +562,9 @@ private:
     //Relay Test table filling
     QStandardItemModel *m_relayTestModel = nullptr;
     QVector<float> m_relayMeasuredValues;
+
+    int failedDiodeCount = 0;
+    int failedRelayCount = 0;
 
 };
 

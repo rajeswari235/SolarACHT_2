@@ -4246,8 +4246,8 @@ void MainWindow::onInsulationResultsCompleted()
 
     QMessageBox::information(
                 this,
-                "Test",
-                "Test Completed Successfully.");
+                ui->label_test_InsuIso->text(),
+                QString("%1 Completed Successfully.").arg(ui->label_test_InsuIso->text()));
 }
 
 void MainWindow::onInsulationNetMarkerReceived(
@@ -5598,6 +5598,11 @@ void MainWindow::loadDiodeTable(const QString &tableName)
     diodeModel->setHeaderData(4, Qt::Horizontal, "Cathode Con");
     diodeModel->setHeaderData(5, Qt::Horizontal, "Cathode Pin");
     diodeModel->setHeaderData(6, Qt::Horizontal, "Expected Voltage");
+
+    qDebug() << "Loaded table:" << diodeModel->tableName();
+    qDebug() << "Columns:" << diodeModel->columnCount();
+    qDebug() << "Rows:" << diodeModel->rowCount();
+
 
     ui->tableView_diode->hideColumn(0);
 }
@@ -7806,7 +7811,7 @@ void MainWindow::on_pushButton_calibrationTest_clicked()
     // -------------------------------------------------
     // Create Calibration table model
     // -------------------------------------------------
-
+    testCalibration=true;
     m_calibrationModel =
             new QStandardItemModel(
                 1920,
@@ -8308,6 +8313,7 @@ void MainWindow::on_pushButton_calibrationSave_clicked()
             "Calibration data saved successfully.\n\n"
             "Total rows saved: %1")
         .arg(m_calibrationModel->rowCount()));
+    qDebug()<<"database saving for calibration complted";
 
 
     //pdf saving
@@ -8321,7 +8327,7 @@ void MainWindow::generateCalibratePDF()
     {
         return;
     }
-
+qDebug()<<"pdf func for calibration";
  //    Create PDF folder on Desktop
     QString desktopPath =
             QStandardPaths::writableLocation(
@@ -8392,6 +8398,7 @@ void MainWindow::generateCalibratePDF()
                 painter,
                 pageWidth,
                 failedPinsCalibrate);
+    qDebug()<<"header part completed";
 
     // 2. Draw table
     drawCalibrateTable(
@@ -8402,6 +8409,7 @@ void MainWindow::generateCalibratePDF()
                 bottom,
                 y,
                 pageNumber);
+    qDebug()<<"table part completed";
 
     // 3. Draw notes, signatures and final page number
     drawTwoWireTestFooter(
@@ -8513,7 +8521,7 @@ void MainWindow::drawCalibrateTable(
     while (currentRow < totalRows)
     {
         // Calculate dynamic row height
-        qreal rowHeight = 24;
+        qreal rowHeight =30;
 
         for (int c = 0; c < 3; ++c)
         {
@@ -8551,7 +8559,7 @@ void MainWindow::drawCalibrateTable(
 
             rowHeight = qMax<qreal>(
                         rowHeight,
-                        textRect.height() + 8.0);
+                        textRect.height() +20);
         }
 
         // Start a new page if the row will not fit
@@ -8583,7 +8591,7 @@ void MainWindow::drawCalibrateTable(
         // Draw current row
         qreal x = left;
 
-        for (int c = 0; c < 9; ++c)
+        for (int c = 0; c < 3; ++c)
         {
             QString value;
 
@@ -9359,7 +9367,7 @@ void MainWindow::drawInsoIsoTable(
     while (currentRow < totalRows)
     {
         // Calculate dynamic row height
-        qreal rowHeight = 24;
+        qreal rowHeight = 30;
 
         for (int c = 0; c < 9; ++c)
         {
@@ -9397,7 +9405,7 @@ void MainWindow::drawInsoIsoTable(
 
             rowHeight = qMax<qreal>(
                         rowHeight,
-                        textRect.height() + 8.0);
+                        textRect.height() +20);
         }
 
         // Start a new page if the row will not fit
@@ -9443,21 +9451,21 @@ void MainWindow::drawInsoIsoTable(
             QFont cellFont = normalFont;
 
             // Result column: Pass / Fail
-            if (c == 7)
-            {
-                if (value.compare(
-                            "Pass", Qt::CaseInsensitive) == 0)
-                {
-                    background = QColor(144, 238, 144);
-                    cellFont = boldFont;
-                }
-                else if (value.compare(
-                                 "Fail", Qt::CaseInsensitive) == 0)
-                {
-                    background = QColor(255, 127, 127);
-                    cellFont = boldFont;
-                }
-            }
+//            if (c == 7)
+//            {
+//                if (value.compare(
+//                            "Pass", Qt::CaseInsensitive) == 0)
+//                {
+//                    background = QColor(144, 238, 144);
+//                    cellFont = boldFont;
+//                }
+//                else if (value.compare(
+//                                 "Fail", Qt::CaseInsensitive) == 0)
+//                {
+//                    background = QColor(255, 127, 127);
+//                    cellFont = boldFont;
+//                }
+//            }
 
             QRectF cell(
                         x,
@@ -9490,6 +9498,23 @@ void MainWindow::on_pushButton_openInsuIsoFiles_clicked()
                "Please wait until the test is completed.");
            return;
        }
+
+    QString desktopPath =
+            QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation);
+
+    QString testType=ui->comboBox_test->currentIndex()==2?"Isolation":"Insulation";
+
+    QString folderPath = desktopPath + "/InsoIso_Pdf";
+
+    QDir dir;
+
+    if (!dir.exists(folderPath))
+        dir.mkpath(folderPath);
+
+    // Open the folder in File Explorer
+    QDesktopServices::openUrl(
+                QUrl::fromLocalFile(folderPath));
 
 }
 
@@ -9564,25 +9589,25 @@ qreal MainWindow::drawTwoWireTestHeader(
                      Qt::AlignLeft,
                      "Date : " +
                      QDate::currentDate().toString("dd-MM-yyyy"));
-    y += 20;
+    y += 22;
 
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Time : " +
                      QTime::currentTime().toString("hh:mm:ss AP"));
-    y += 20;
+    y += 22;
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Test Type : " +
                     testType);
-    y += 20;
+    y += 22;
     if(!testCalibration)
     {
 
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Set No : " + ui->lineEdit_setNo->text());
-    y += 20;
+    y += 22;
 
 
 
@@ -9591,7 +9616,7 @@ qreal MainWindow::drawTwoWireTestHeader(
     painter.drawText(QRectF(0, y, pageWidth, 14),
                      Qt::AlignLeft,
                      "Final Result : " + result);
-    y += 20;
+    y += 22;
 
     painter.setFont(boldFont);
 
@@ -9602,7 +9627,8 @@ qreal MainWindow::drawTwoWireTestHeader(
                      QString::number(failedPinsCount));
     }
 
-    return y + 40;
+    return y + 50;
+    qDebug()<<"header part completed successfully";
 }
 
 void MainWindow::generateTwoWireTestPDF()
@@ -9726,6 +9752,228 @@ void MainWindow::generateTwoWireTestPDF()
                 "PDF",
                 "PDF generated successfully.");
 }
+void MainWindow::drawDiodeTestTable(
+        QPainter &painter,
+        QPrinter &printer,
+        qreal pageWidth,
+        qreal pageHeight,
+        qreal bottom,
+        qreal &y,
+        int &pageNumber)
+{
+    const qreal left = 0;
+
+    // Table column widths
+    const qreal proportions[] = {
+        0.055, 0.085, 0.175, 0.072, 0.175,
+        0.075, 0.160, 0.105, 0.098
+    };
+
+    qreal colWidths[9];
+   // qDebug() << "Column widths count:" << colWidths.size();
+    qDebug() << "Diode model columns:" << diodeModel->columnCount();
+
+    for (int c = 0; c < 9; ++c)
+        colWidths[c] = pageWidth * proportions[c];
+
+    // Table headers
+    const QStringList headers = {
+        "S.No", "Loom", "Src Conn\n(Anode)", "Src\nPin",
+        "Dstn Conn\n(Cathode)", "Dstn\nPin",
+        "Voltage\nDrop Across\nDiode", "Result", "Remarks"
+    };
+
+    // Fonts
+    QFont normalFont("Times New Roman", 11);
+
+    QFont boldFont("Times New Roman", 11);
+    boldFont.setBold(true);
+
+    // Draw a table cell
+    auto drawCell = [&](
+            const QRectF &rect,
+            const QString &value,
+            const QFont &font,
+            const QColor &background)
+    {
+        painter.fillRect(rect, background);
+
+        painter.setPen(Qt::black);
+        painter.drawRect(rect);
+
+        painter.setFont(font);
+
+        QRectF textRect = rect.adjusted(3, 2, -3, -2);
+
+        painter.drawText(
+                    textRect,
+                    Qt::AlignCenter |
+                    Qt::TextWordWrap |
+                    Qt::TextWrapAnywhere,
+                    value);
+    };
+
+    // Draw the table header
+    auto drawTableHeader = [&](qreal &currentY)
+    {
+        const qreal headerHeight = 55;
+        qreal x = left;
+
+        for (int c = 0; c < 9; ++c)
+        {
+            QRectF cell(
+                        x,
+                        currentY,
+                        colWidths[c],
+                        headerHeight);
+
+            drawCell(
+                        cell,
+                        headers[c],
+                        boldFont,
+                        QColor(204, 204, 204));
+
+            x += colWidths[c];
+        }
+
+        currentY += headerHeight;
+    };
+    qDebug()<<"header part completed";
+
+    int totalRows = m_diodeTestModel->rowCount();
+    qDebug()<<"totalRows"<<totalRows;
+    int currentRow = 0;
+
+    // Draw table header on the first page
+    drawTableHeader(y);
+
+    // Draw the table rows
+    while (currentRow < totalRows)
+    {
+        // Calculate dynamic row height
+
+        qreal rowHeight =30;
+
+        for (int c = 0; c < 9; ++c)
+        {
+            QString value;
+
+
+            QStandardItem *item =
+                    m_diodeTestModel->item(currentRow, c);
+
+            if (item)
+                value = item->text();
+
+
+            QFont cellFont = normalFont;
+
+            if (c == 7&&
+                (value.compare(
+                     "Pass", Qt::CaseInsensitive) == 0 ||
+                 value.compare(
+                     "Pass", Qt::CaseInsensitive) != 0))
+            {
+                cellFont = boldFont;
+            }
+
+            QFontMetricsF metrics(cellFont);
+
+            QRectF textRect = metrics.boundingRect(
+                        QRectF(
+                            0, 0,
+                            qMax(1, static_cast<int>(
+                                 colWidths[c] - 8)),
+                            10000),
+                        Qt::AlignCenter |
+                        Qt::TextWordWrap |
+                        Qt::TextWrapAnywhere,
+                        value);
+
+            rowHeight = qMax<qreal>(
+                        rowHeight,
+                        textRect.height() + 20.0);
+        }
+
+        // Start a new page if the row will not fit
+        if (y + rowHeight > bottom)
+        {
+            // Current page footer
+            painter.setFont(boldFont);
+            painter.setPen(Qt::black);
+
+            painter.drawText(
+                        QRectF(
+                            0,
+                            pageHeight - 25,
+                            pageWidth,
+                            15),
+                        Qt::AlignCenter,
+                        "Page " + QString::number(pageNumber));
+
+            printer.newPage();
+
+            ++pageNumber;
+
+            y = 0;
+
+            // Repeat table header on the new page
+            drawTableHeader(y);
+        }
+
+        // Draw current row
+        qreal x = left;
+
+        for (int c = 0; c < 9; ++c)
+        {
+            QString value;
+
+            QStandardItem *item =
+                    m_diodeTestModel->item(currentRow, c);
+
+            if (item)
+                value = item->text();
+
+            QColor background = Qt::white;
+            QFont cellFont = normalFont;
+
+            // Result column: Pass / Fail
+//            if (c == 7)
+//            {
+//                if (value.compare(
+//                            "Pass", Qt::CaseInsensitive) == 0)
+//                {
+//                    background = QColor(144, 238, 144);
+//                    cellFont = boldFont;
+//                }
+//                else if (value.compare(
+//                                 "Pass", Qt::CaseInsensitive) != 0)
+//                {
+//                    background = QColor(255, 127, 127);
+//                    cellFont = boldFont;
+//                }
+//            }
+
+            QRectF cell(
+                        x,
+                        y,
+                        colWidths[c],
+                        rowHeight);
+
+            drawCell(
+                        cell,
+                        value,
+                        cellFont,
+                        background);
+
+            x += colWidths[c];
+        }
+
+        y += rowHeight;
+        ++currentRow;
+    }
+    y+=20;
+}
 void MainWindow::drawTwoWireTestTable(
         QPainter &painter,
         QPrinter &printer,
@@ -9739,7 +9987,7 @@ void MainWindow::drawTwoWireTestTable(
 
     // Table column widths
     const qreal proportions[] = {
-        0.055, 0.075, 0.175, 0.075, 0.175,
+        0.055, 0.085, 0.175, 0.065, 0.175,
         0.075, 0.085, 0.105, 0.080, 0.100
     };
 
@@ -9750,7 +9998,7 @@ void MainWindow::drawTwoWireTestTable(
 
     // Table headers
     const QStringList headers = {
-        "S.No", "Cable", "Src Conn", "Src Pin",
+        "S.No", "Cable", "Src Conn", "Src\nPin",
         "Dstn Conn", "Dstn\nPin",
         "Exp\nValue", "Measured", "Result", "Remarks"
     };
@@ -9821,7 +10069,7 @@ void MainWindow::drawTwoWireTestTable(
     while (currentRow < totalRows)
     {
         // Calculate dynamic row height
-        qreal rowHeight = 24;
+        qreal rowHeight = 30;
 
         for (int c = 0; c < 10; ++c)
         {
@@ -9859,7 +10107,7 @@ void MainWindow::drawTwoWireTestTable(
 
             rowHeight = qMax<qreal>(
                         rowHeight,
-                        textRect.height() + 8.0);
+                        textRect.height() + 20);
         }
 
         // Start a new page if the row will not fit
@@ -9905,21 +10153,21 @@ void MainWindow::drawTwoWireTestTable(
             QFont cellFont = normalFont;
 
             // Result column: Pass / Fail
-            if (c == 8)
-            {
-                if (value.compare(
-                            "Pass", Qt::CaseInsensitive) == 0)
-                {
-                    background = QColor(144, 238, 144);
-                    cellFont = boldFont;
-                }
-                else if (value.compare(
-                                 "Fail", Qt::CaseInsensitive) == 0)
-                {
-                    background = QColor(255, 127, 127);
-                    cellFont = boldFont;
-                }
-            }
+//            if (c == 8)
+//            {
+//                if (value.compare(
+//                            "Pass", Qt::CaseInsensitive) == 0)
+//                {
+//                    background = QColor(144, 238, 144);
+//                    cellFont = boldFont;
+//                }
+//                else if (value.compare(
+//                                 "Fail", Qt::CaseInsensitive) == 0)
+//                {
+//                    background = QColor(255, 127, 127);
+//                    cellFont = boldFont;
+//                }
+//            }
 
             QRectF cell(
                         x,
@@ -9978,7 +10226,7 @@ void MainWindow::drawTwoWireTestFooter(
         25.0, notesDocument.size().height() + 10.0);
 
     qreal signatureHeight = 60.0;
-    qreal requiredHeight = notesHeight + signatureHeight + 30.0;
+    qreal requiredHeight = notesHeight + signatureHeight + 35.0;
 
     if (y + requiredHeight > bottom)
     {
@@ -10333,8 +10581,131 @@ void MainWindow::on_pushButton_saveDiodeTest_clicked()
         return;
     }
 
+    failedDiodeCount = 0;
+    generateDiodeTestPDF();
     // Add Save functionality here
 }
+void MainWindow::generateDiodeTestPDF()
+{
+    if (!m_diodeTestModel)
+        return;
+
+ //    Create PDF folder on Desktop
+    QString desktopPath =
+            QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation);
+
+    QString folderPath = desktopPath + "/DiodeTest_Pdf";
+
+    QDir dir;
+
+    if (!dir.exists(folderPath))
+        dir.mkpath(folderPath);
+
+    // Generate filename with timestamp
+    QString timestamp =
+            QDateTime::currentDateTime()
+            .toString("yyyyMMdd_HHmmss");
+
+    QString fileName = folderPath +
+            "/DiodeTest_" + timestamp + ".pdf";
+
+    if (fileName.isEmpty())
+        return;
+
+    if (!fileName.endsWith(".pdf", Qt::CaseInsensitive))
+        fileName += ".pdf";
+
+    // Printer setup
+    QPrinter printer(QPrinter::HighResolution);
+
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(fileName);
+    printer.setPageSize(QPageSize(QPageSize::A4));
+    printer.setOrientation(QPrinter::Portrait);
+
+    printer.setPageMargins(
+                15, 15, 15, 20,
+                QPrinter::Millimeter);
+
+    printer.setResolution(96);
+
+    // Start painting
+    QPainter painter;
+
+    if (!painter.begin(&printer))
+    {
+        QMessageBox::warning(
+                    this,
+                    "PDF",
+                    "Unable to create PDF.");
+        return;
+    }
+
+    // Calculate page dimensions
+    QRect deviceRect =
+            printer.pageLayout().paintRectPixels(
+                printer.resolution());
+
+    const qreal pageWidth = deviceRect.width();
+    const qreal pageHeight = deviceRect.height();
+
+    const qreal bottom = pageHeight - 25;
+
+    // Count failed pins from Result column (column 8)
+     failedDiodeCount = 0;
+    for (int row = 0;
+         row < m_diodeTestModel->rowCount();
+         ++row)
+    {
+        QStandardItem *item =
+                m_diodeTestModel->item(row, 7);
+
+        if (item &&
+            item->text().compare(
+                "PASS", Qt::CaseInsensitive) != 0)
+        {
+            ++failedDiodeCount;
+        }
+    }
+
+    int pageNumber = 1;
+
+    // 1. Draw report header
+    qreal y = drawTwoWireTestHeader(
+                painter,
+                pageWidth,
+                failedDiodeCount);
+
+    // 2. Draw table
+    drawDiodeTestTable(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                y,
+                pageNumber);
+
+    // 3. Draw notes, signatures and final page number
+    drawTwoWireTestFooter(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                y,
+                pageNumber);
+
+    // Finish PDF generation
+    painter.end();
+
+    QMessageBox::information(
+                this,
+                "PDF",
+                "PDF generated successfully.");
+}
+
 
 void MainWindow::on_pushButton_openDiodeTest_clicked()
 {
@@ -10348,6 +10719,19 @@ void MainWindow::on_pushButton_openDiodeTest_clicked()
     }
 
     // Add Open Files functionality here
+    QString desktopPath =
+            QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation);
+
+    QString folderPath = desktopPath + "/DiodeTest_Pdf";
+
+    QDir dir;
+
+    if (!dir.exists(folderPath))
+        dir.mkpath(folderPath);
+    QDesktopServices::openUrl(
+                QUrl::fromLocalFile(folderPath));
+
 }
 
 
@@ -10379,6 +10763,360 @@ void MainWindow::on_pushButton_saveRelayTest_clicked()
     }
 
     // Add Save functionality here
+    failedRelayCount = 0;
+    generateRelayTestPDF();
+
+}
+void MainWindow::generateRelayTestPDF()
+{
+//    if (!m_relayTestModel)
+//        return;
+
+ //    Create PDF folder on Desktop
+    QString desktopPath =
+            QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation);
+
+    QString folderPath = desktopPath + "/RelayTest_Pdf";
+
+    QDir dir;
+
+    if (!dir.exists(folderPath))
+        dir.mkpath(folderPath);
+
+    // Generate filename with timestamp
+    QString timestamp =
+            QDateTime::currentDateTime()
+            .toString("yyyyMMdd_HHmmss");
+
+    QString fileName = folderPath +
+            "/RelayTest_" + timestamp + ".pdf";
+
+    if (fileName.isEmpty())
+        return;
+
+    if (!fileName.endsWith(".pdf", Qt::CaseInsensitive))
+        fileName += ".pdf";
+
+    // Printer setup
+    QPrinter printer(QPrinter::HighResolution);
+
+    printer.setOutputFormat(QPrinter::PdfFormat);
+    printer.setOutputFileName(fileName);
+    printer.setPageSize(QPageSize(QPageSize::A4));
+    printer.setOrientation(QPrinter::Portrait);
+
+    printer.setPageMargins(
+                15, 15, 15, 20,
+                QPrinter::Millimeter);
+
+    printer.setResolution(96);
+
+    // Start painting
+    QPainter painter;
+
+    if (!painter.begin(&printer))
+    {
+        QMessageBox::warning(
+                    this,
+                    "PDF",
+                    "Unable to create PDF.");
+        return;
+    }
+
+    // Calculate page dimensions
+    QRect deviceRect =
+            printer.pageLayout().paintRectPixels(
+                printer.resolution());
+
+    const qreal pageWidth = deviceRect.width();
+    const qreal pageHeight = deviceRect.height();
+
+    const qreal bottom = pageHeight - 25;
+
+    // Count failed pins from Result column (column 8)
+     failedRelayCount = 0;
+    for (int row = 0;
+         row < m_relayTestModel->rowCount();
+         ++row)
+    {
+        QStandardItem *item =
+                m_relayTestModel->item(row, 12);
+
+        if (item &&
+            item->text().compare(
+                "PASS", Qt::CaseInsensitive) != 0)
+        {
+            ++failedRelayCount;
+        }
+    }
+
+    int pageNumber = 1;
+
+    // 1. Draw report header
+    qreal y = drawTwoWireTestHeader(
+                painter,
+                pageWidth,
+                failedRelayCount);
+
+    // 2. Draw table
+    drawRelayTestTable(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                y,
+                pageNumber);
+
+    // 3. Draw notes, signatures and final page number
+    drawTwoWireTestFooter(
+                painter,
+                printer,
+                pageWidth,
+                pageHeight,
+                bottom,
+                y,
+                pageNumber);
+
+    // Finish PDF generation
+    painter.end();
+
+    QMessageBox::information(
+                this,
+                "PDF",
+                "PDF generated successfully.");
+}
+void MainWindow::drawRelayTestTable(
+        QPainter &painter,
+        QPrinter &printer,
+        qreal pageWidth,
+        qreal pageHeight,
+        qreal bottom,
+        qreal &y,
+        int &pageNumber)
+{
+    const qreal left = 0;
+
+    // Table column widths
+    const qreal proportions[] = {
+        0.055, 0.085,0.0,0.0, 0.185, 0.102, 0.0,0.0,0.075,
+        0.092, 0.120, 0.108, 0.098, 0.080
+    };
+
+    qreal colWidths[14];
+
+    for (int c = 0; c < 14; ++c)
+        colWidths[c] = pageWidth * proportions[c];
+    // Table headers
+    const QStringList headers = {
+        "S.No", "Cable", " "," ","Relay Conn", "Relay\nPin"," ","",
+        "Excitation\nVolt", "Exp\nValue",
+        "Condition", "Measured", "Results","Remarks"
+    };
+    qDebug()<<"headers set successfully";
+    // Fonts
+    QFont normalFont("Times New Roman", 11);
+
+    QFont boldFont("Times New Roman", 11);
+    boldFont.setBold(true);
+
+    // Draw a table cell
+    auto drawCell = [&](
+            const QRectF &rect,
+            const QString &value,
+            const QFont &font,
+            const QColor &background)
+    {
+        painter.fillRect(rect, background);
+
+        painter.setPen(Qt::black);
+        painter.drawRect(rect);
+
+        painter.setFont(font);
+
+        QRectF textRect = rect.adjusted(3, 2, -3, -2);
+
+        painter.drawText(
+                    textRect,
+                    Qt::AlignCenter |
+                    Qt::TextWordWrap |
+                    Qt::TextWrapAnywhere,
+                    value);
+    };
+
+    // Draw the table header
+    auto drawTableHeader = [&](qreal &currentY)
+    {
+        const qreal headerHeight = 50;
+        qreal x = left;
+
+        for (int c = 0; c < 14; ++c)
+        {
+            if(c==2 ||c==3||c==6||c==7)
+            {
+                continue;
+            }
+            QRectF cell(
+                        x,
+                        currentY,
+                        colWidths[c],
+                        headerHeight);
+
+            drawCell(
+                        cell,
+                        headers[c],
+                        boldFont,
+                        QColor(204, 204, 204));
+
+            x += colWidths[c];
+        }
+
+        currentY += headerHeight;
+    };
+
+
+    int totalRows = m_relayTestModel->rowCount();
+
+    int currentRow = 0;
+
+    // Draw table header on the first page
+    drawTableHeader(y);
+    qDebug()<<"header part completed";
+    qDebug()<<"totalRows"<<totalRows;
+
+    // Draw the table rows
+    while (currentRow < totalRows)
+    {
+        // Calculate dynamic row height
+
+        qreal rowHeight = 30;
+
+        for (int c = 0; c < 14; ++c)
+        {
+            QString value;
+            if(c==2 ||c==3||c==6||c==7)
+            {
+                qDebug()<<"here problem occurs";
+                continue;
+            }
+
+
+            QStandardItem *item =
+                    m_relayTestModel->item(currentRow, c);
+
+            if (item)
+                value = item->text();
+
+
+            QFont cellFont = normalFont;
+
+            if (c == 12&&
+                (value.compare(
+                     "Pass", Qt::CaseInsensitive) == 0 ||
+                 value.compare(
+                     "Pass", Qt::CaseInsensitive) != 0))
+            {
+                cellFont = boldFont;
+            }
+
+            QFontMetricsF metrics(cellFont);
+
+            QRectF textRect = metrics.boundingRect(
+                        QRectF(
+                            0, 0,
+                            qMax(1, static_cast<int>(
+                                 colWidths[c] - 8)),
+                            10000),
+                        Qt::AlignCenter |
+                        Qt::TextWordWrap |
+                        Qt::TextWrapAnywhere,
+                        value);
+
+            rowHeight = qMax<qreal>(
+                        rowHeight,
+                        textRect.height() + 20);
+        }
+
+        // Start a new page if the row will not fit
+        if (y + rowHeight > bottom)
+        {
+            // Current page footer
+            painter.setFont(boldFont);
+            painter.setPen(Qt::black);
+
+            painter.drawText(
+                        QRectF(
+                            0,
+                            pageHeight - 25,
+                            pageWidth,
+                            15),
+                        Qt::AlignCenter,
+                        "Page " + QString::number(pageNumber));
+
+            printer.newPage();
+
+            ++pageNumber;
+
+            y = 0;
+
+            // Repeat table header on the new page
+            drawTableHeader(y);
+        }
+
+        // Draw current row
+        qreal x = left;
+
+        for (int c = 0; c < 14; ++c)
+        {
+            QString value;
+
+            QStandardItem *item =
+                    m_relayTestModel->item(currentRow, c);
+
+            if (item)
+                value = item->text();
+
+
+            QColor background = Qt::white;
+            QFont cellFont = normalFont;
+
+            // Result column: Pass / Fail
+//            if (c == 12)
+//            {
+//                if (value.compare(
+//                            "Pass", Qt::CaseInsensitive) == 0)
+//                {
+//                    background = QColor(144, 238, 144);
+//                    cellFont = boldFont;
+//                }
+//                else if (value.compare(
+//                                 "Pass", Qt::CaseInsensitive) != 0)
+//                {
+//                    background = QColor(255, 127, 127);
+//                    cellFont = boldFont;
+//                }
+//            }
+
+            QRectF cell(
+                        x,
+                        y,
+                        colWidths[c],
+                        rowHeight);
+
+            drawCell(
+                        cell,
+                        value,
+                        cellFont,
+                        background);
+
+            x += colWidths[c];
+        }
+
+        y += rowHeight;
+        ++currentRow;
+    }
+    y+=20;
 }
 
 void MainWindow::on_pushButton_openRelayTest_clicked()
@@ -10392,7 +11130,21 @@ void MainWindow::on_pushButton_openRelayTest_clicked()
         return;
     }
 
+
     // Add Open Files functionality here
+
+    QString desktopPath =
+            QStandardPaths::writableLocation(
+                QStandardPaths::DesktopLocation);
+
+    QString folderPath = desktopPath + "/RelayTest_Pdf";
+
+    QDir dir;
+
+    if (!dir.exists(folderPath))
+        dir.mkpath(folderPath);
+    QDesktopServices::openUrl(
+                QUrl::fromLocalFile(folderPath));
 }
 
 void MainWindow::on_pushButton_backFromRelayTest_clicked()
@@ -10407,4 +11159,20 @@ void MainWindow::on_pushButton_backFromRelayTest_clicked()
     }
 
     ui->stackedWidget->setCurrentWidget(ui->page_test);
+}
+
+void MainWindow::on_pushButton_openTwoWireFiles_clicked()
+{
+    QString desktopPath =
+               QStandardPaths::writableLocation(
+                   QStandardPaths::DesktopLocation);
+
+       QString folderPath = desktopPath + "/TwoWire_Pdf";
+
+       // Create the folder if it doesn't exist
+       QDir().mkpath(folderPath);
+
+       // Open the folder in File Explorer
+       QDesktopServices::openUrl(
+                   QUrl::fromLocalFile(folderPath));
 }
