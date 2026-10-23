@@ -56,7 +56,7 @@
     gridline-color: #d9d9d9;</string>
       </property>
       <property name="currentIndex">
-       <number>17</number>
+       <number>4</number>
       </property>
       <widget class="QWidget" name="page">
        <layout class="QGridLayout" name="gridLayout_2">
@@ -3705,7 +3705,7 @@ QPushButton:pressed
            <enum>QTabWidget::Triangular</enum>
           </property>
           <property name="currentIndex">
-           <number>0</number>
+           <number>2</number>
           </property>
           <widget class="QWidget" name="tab_patch">
            <attribute name="title">
@@ -5560,7 +5560,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -5729,7 +5729,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -5874,7 +5874,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -5886,7 +5886,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>true</bool>
+             <bool>false</bool>
             </property>
            </widget>
           </item>
@@ -7333,7 +7333,7 @@ QPushButton:disabled {
      <x>0</x>
      <y>0</y>
      <width>968</width>
-     <height>21</height>
+     <height>22</height>
     </rect>
    </property>
   </widget>
