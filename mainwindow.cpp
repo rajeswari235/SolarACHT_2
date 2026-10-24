@@ -8455,6 +8455,30 @@ void MainWindow::drawCalibrateTable(
         "Connector", "Pin","Calibration Value(Ω)"
     };
 
+    QImage watermark(":/new/prefix1/images/charka.png");
+    auto drawWatermark = [&]()
+    {
+        if (watermark.isNull())
+            return;
+
+        qreal watermarkWidth = pageWidth * 0.75;
+        qreal watermarkHeight =
+                watermarkWidth * watermark.height()
+                / watermark.width();
+
+        QRectF watermarkRect(
+            (pageWidth - watermarkWidth) / 2,
+            (pageHeight - watermarkHeight) / 2,
+            watermarkWidth,
+            watermarkHeight
+        );
+
+        painter.save();
+        painter.setOpacity(0.50);
+        painter.drawImage(watermarkRect, watermark);
+        painter.restore();
+    };
+
     // Fonts
     QFont normalFont("Times New Roman", 11);
 
@@ -8468,7 +8492,8 @@ void MainWindow::drawCalibrateTable(
             const QFont &font,
             const QColor &background)
     {
-        painter.fillRect(rect, background);
+        if (background != Qt::transparent)
+            painter.fillRect(rect, background);
 
         painter.setPen(Qt::black);
         painter.drawRect(rect);
@@ -8515,6 +8540,7 @@ void MainWindow::drawCalibrateTable(
     int currentRow = 0;
 
     // Draw table header on the first page
+    drawWatermark();
     drawTableHeader(y);
 
     // Draw the table rows
@@ -8585,6 +8611,7 @@ void MainWindow::drawCalibrateTable(
             y = 0;
 
             // Repeat table header on the new page
+            drawWatermark();
             drawTableHeader(y);
         }
 
@@ -8601,7 +8628,7 @@ void MainWindow::drawCalibrateTable(
             if (item)
                 value = item->text();
 
-            QColor background = Qt::white;
+            QColor background = Qt::transparent;
             QFont cellFont = normalFont;
 
 //            // Result column: Pass / Fail
@@ -9301,6 +9328,30 @@ void MainWindow::drawInsoIsoTable(
         "Exp\nValue", "Result", "Remarks"
     };
 
+    QImage watermark(":/new/prefix1/images/charka.png");
+    auto drawWatermark = [&]()
+    {
+        if (watermark.isNull())
+            return;
+
+        qreal watermarkWidth = pageWidth * 0.50;
+        qreal watermarkHeight =
+                watermarkWidth * watermark.height()
+                / watermark.width();
+
+        QRectF watermarkRect(
+            (pageWidth - watermarkWidth) / 2,
+            (pageHeight - watermarkHeight) / 2,
+            watermarkWidth,
+            watermarkHeight
+        );
+
+        painter.save();
+        painter.setOpacity(0.30);  // 12% opacity
+        painter.drawImage(watermarkRect, watermark);
+        painter.restore();
+    };
+
     // Fonts
     QFont normalFont("Times New Roman", 11);
 
@@ -9314,7 +9365,8 @@ void MainWindow::drawInsoIsoTable(
             const QFont &font,
             const QColor &background)
     {
-        painter.fillRect(rect, background);
+        if (background != Qt::transparent)
+            painter.fillRect(rect, background);
 
         painter.setPen(Qt::black);
         painter.drawRect(rect);
@@ -9361,6 +9413,7 @@ void MainWindow::drawInsoIsoTable(
     int currentRow = 0;
 
     // Draw table header on the first page
+    drawWatermark();
     drawTableHeader(y);
 
     // Draw the table rows
@@ -9378,6 +9431,7 @@ void MainWindow::drawInsoIsoTable(
 
             if (item)
                 value = item->text();
+
 
             QFont cellFont = normalFont;
 
@@ -9431,6 +9485,7 @@ void MainWindow::drawInsoIsoTable(
             y = 0;
 
             // Repeat table header on the new page
+            drawWatermark();
             drawTableHeader(y);
         }
 
@@ -9447,7 +9502,7 @@ void MainWindow::drawInsoIsoTable(
             if (item)
                 value = item->text();
 
-            QColor background = Qt::white;
+            QColor background = Qt::transparent;
             QFont cellFont = normalFont;
 
             // Result column: Pass / Fail
@@ -9783,6 +9838,31 @@ void MainWindow::drawDiodeTestTable(
         "Voltage\nDrop Across\nDiode", "Result", "Remarks"
     };
 
+    QImage watermark(":/new/prefix1/images/charka.png");
+    auto drawWatermark = [&]()
+    {
+        if (watermark.isNull())
+            return;
+
+        qreal watermarkWidth = pageWidth * 0.75;
+        qreal watermarkHeight =
+                watermarkWidth * watermark.height()
+                / watermark.width();
+
+        QRectF watermarkRect(
+            (pageWidth - watermarkWidth) / 2,
+            (pageHeight - watermarkHeight) / 2,
+            watermarkWidth,
+            watermarkHeight
+        );
+
+        painter.save();
+        painter.setOpacity(0.50);  // 12% opacity
+        painter.drawImage(watermarkRect, watermark);
+        painter.restore();
+    };
+
+
     // Fonts
     QFont normalFont("Times New Roman", 11);
 
@@ -9796,7 +9876,8 @@ void MainWindow::drawDiodeTestTable(
             const QFont &font,
             const QColor &background)
     {
-        painter.fillRect(rect, background);
+        if (background != Qt::transparent)
+            painter.fillRect(rect, background);
 
         painter.setPen(Qt::black);
         painter.drawRect(rect);
@@ -9845,6 +9926,7 @@ void MainWindow::drawDiodeTestTable(
     int currentRow = 0;
 
     // Draw table header on the first page
+    drawWatermark();
     drawTableHeader(y);
 
     // Draw the table rows
@@ -9918,6 +10000,7 @@ void MainWindow::drawDiodeTestTable(
             y = 0;
 
             // Repeat table header on the new page
+            drawWatermark();
             drawTableHeader(y);
         }
 
@@ -9933,8 +10016,7 @@ void MainWindow::drawDiodeTestTable(
 
             if (item)
                 value = item->text();
-
-            QColor background = Qt::white;
+            QColor background = Qt::transparent;
             QFont cellFont = normalFont;
 
             // Result column: Pass / Fail
@@ -9983,6 +10065,7 @@ void MainWindow::drawTwoWireTestTable(
         qreal &y,
         int &pageNumber)
 {
+
     const qreal left = 0;
 
     // Table column widths
@@ -10002,6 +10085,29 @@ void MainWindow::drawTwoWireTestTable(
         "Dstn Conn", "Dstn\nPin",
         "Exp\nValue", "Measured", "Result", "Remarks"
     };
+    QImage watermark(":/new/prefix1/images/charka.png");
+    auto drawWatermark = [&]()
+    {
+        if (watermark.isNull())
+            return;
+
+        qreal watermarkWidth = pageWidth * 0.75;
+        qreal watermarkHeight =
+                watermarkWidth * watermark.height()
+                / watermark.width();
+
+        QRectF watermarkRect(
+            (pageWidth - watermarkWidth) / 2,
+            (pageHeight - watermarkHeight) / 2,
+            watermarkWidth,
+            watermarkHeight
+        );
+
+        painter.save();
+        painter.setOpacity(0.50);  // 12% opacity
+        painter.drawImage(watermarkRect, watermark);
+        painter.restore();
+    };
 
     // Fonts
     QFont normalFont("Times New Roman", 11);
@@ -10016,7 +10122,8 @@ void MainWindow::drawTwoWireTestTable(
             const QFont &font,
             const QColor &background)
     {
-        painter.fillRect(rect, background);
+        if (background != Qt::transparent)
+            painter.fillRect(rect, background);
 
         painter.setPen(Qt::black);
         painter.drawRect(rect);
@@ -10063,7 +10170,9 @@ void MainWindow::drawTwoWireTestTable(
     int currentRow = 0;
 
     // Draw table header on the first page
+    drawWatermark();
     drawTableHeader(y);
+
 
     // Draw the table rows
     while (currentRow < totalRows)
@@ -10133,7 +10242,9 @@ void MainWindow::drawTwoWireTestTable(
             y = 0;
 
             // Repeat table header on the new page
+            drawWatermark();
             drawTableHeader(y);
+
         }
 
         // Draw current row
@@ -10149,7 +10260,7 @@ void MainWindow::drawTwoWireTestTable(
             if (item)
                 value = item->text();
 
-            QColor background = Qt::white;
+            QColor background = Qt::transparent;
             QFont cellFont = normalFont;
 
             // Result column: Pass / Fail
@@ -10262,17 +10373,17 @@ void MainWindow::drawTwoWireTestFooter(
     painter.setPen(Qt::black);
 
     painter.drawText(
-        QRectF(0, y, pageWidth / 3, 20),
+        QRectF(20, y, (pageWidth-40) / 3, 20),
         Qt::AlignLeft,
         "Test Performed By:");
 
     painter.drawText(
-        QRectF(pageWidth / 3, y, pageWidth / 3, 20),
+        QRectF((pageWidth-40) / 3, y, pageWidth / 3, 20),
         Qt::AlignHCenter,
         "Prod. In-Charge");
 
     painter.drawText(
-        QRectF(2 * pageWidth / 3, y, pageWidth / 3, 20),
+        QRectF(2 * (pageWidth-40) / 3, y, pageWidth / 3, 20),
         Qt::AlignRight,
         "Inspected By:");
 
@@ -10280,7 +10391,7 @@ void MainWindow::drawTwoWireTestFooter(
     painter.drawText(
         QRectF(0, pageHeight - 25, pageWidth, 15),
         Qt::AlignCenter,
-        "Page " + QString::number(pageNumber));
+        "Page "+ QString::number(pageNumber));
 }
 void MainWindow::on_pushButton_selfTestSave_clicked()
 {
@@ -10401,6 +10512,30 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
                 Qt::AlignCenter,
                 "SELF TEST REPORT");
 
+    QImage watermark(":/new/prefix1/images/charka.png");
+    auto drawWatermark = [&]()
+    {
+        if (watermark.isNull())
+            return;
+
+        qreal watermarkWidth = pageWidth * 0.75;
+        qreal watermarkHeight =
+                watermarkWidth * watermark.height()
+                / watermark.width();
+
+        QRectF watermarkRect(
+            (pageWidth - watermarkWidth) / 2,
+            (pageHeight - watermarkHeight) / 2,
+            watermarkWidth,
+            watermarkHeight
+        );
+
+        painter.save();
+        painter.setOpacity(0.30);  // 12% opacity
+        painter.drawImage(watermarkRect, watermark);
+        painter.restore();
+    };
+
     qreal y = 180;
 
     int pageNumber = 1;
@@ -10457,10 +10592,26 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
     const qreal contentBottom = pageHeight - bottomMargin;
 
 
+     drawWatermark();
+
     for (const QString &text : values)
     {
-
         QString displayText = text.trimmed();
+
+        // Remove lines containing "Testing..."
+        QStringList lines = displayText.split('\n');
+        QStringList filteredLines;
+
+        for (const QString &line : lines)
+        {
+            if (!line.contains("Testing...", Qt::CaseInsensitive))
+                filteredLines.append(line);
+        }
+
+        displayText = filteredLines.join('\n').trimmed();
+
+        if (displayText.isEmpty())
+            continue;
 
         QTextDocument document;
         document.setDefaultFont(normalFont);
@@ -10468,8 +10619,25 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
         document.setTextWidth(columnWidth);
 
         QTextOption textOption;
-        textOption.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        textOption.setWrapMode(
+            QTextOption::WrapAtWordBoundaryOrAnywhere);
         document.setDefaultTextOption(textOption);
+
+        // Make the first line bold and slightly larger
+        QTextCursor cursor(&document);
+        cursor.movePosition(QTextCursor::Start);
+        cursor.movePosition(QTextCursor::EndOfBlock,
+                            QTextCursor::KeepAnchor);
+
+        QTextCharFormat firstLineFormat;
+        QFont firstLineFont = normalFont;
+        firstLineFont.setPointSize(normalFont.pointSize() + 2);
+        firstLineFont.setBold(true);
+        firstLineFormat.setFont(firstLineFont);
+
+        cursor.mergeCharFormat(firstLineFormat);
+
+        // Calculate height after formatting
         qreal textHeight = document.size().height();
         qreal rowHeight = qMax(30.0, textHeight + 12);
 
@@ -10482,11 +10650,14 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
             }
             else
             {
-                drawPageBorder(pageNumber==1);
-                drawPageNumber();
+                drawPageBorder(pageNumber == 1);
 
                 printer.newPage();
+
                 pageNumber++;
+                drawPageNumber();
+                 drawWatermark();
+
 
                 column = 0;
                 columnY[0] = top;
@@ -10498,27 +10669,29 @@ void MainWindow::on_pushButton_selfTestSave_clicked()
                   ? left
                   : left + columnWidth + columnGap;
 
-        // Draw the complete text, preserving its line breaks
+        // Draw the formatted text
         painter.save();
         painter.translate(x, columnY[column]);
+
         document.drawContents(
             &painter,
-            QRectF(0, 0, columnWidth, textHeight)
-        );
+            QRectF(0, 0, columnWidth, textHeight));
+
         painter.restore();
 
-//        // Separator between separate QTextEdit entries
-//        painter.setPen(QPen(Qt::lightGray, 0.5));
-//        painter.drawLine(
-//            QPointF(x, columnY[column] + rowHeight),
-//            QPointF(x + columnWidth, columnY[column] + rowHeight)
-//        );
+        // Separate each value visually
+        painter.setPen(QPen(Qt::lightGray, 0.5));
+        painter.drawLine(
+            QPointF(x, columnY[column] + rowHeight),
+            QPointF(x + columnWidth, columnY[column] + rowHeight));
 
         columnY[column] += rowHeight + 5;
-}
+    }
+
 
     // Draw border and page number on the final page
     drawPageBorder(pageNumber == 1);
+    drawWatermark();
     //drawPageNumber();
     qDebug()<<"lastly y value is"<<columnY[0];
     const qreal bottom = pageHeight - 25;
@@ -10909,11 +11082,38 @@ void MainWindow::drawRelayTestTable(
     for (int c = 0; c < 14; ++c)
         colWidths[c] = pageWidth * proportions[c];
     // Table headers
+
     const QStringList headers = {
         "S.No", "Cable", " "," ","Relay Conn", "Relay\nPin"," ","",
         "Excitation\nVolt", "Exp\nValue",
         "Condition", "Measured", "Results","Remarks"
     };
+
+
+    QImage watermark(":/new/prefix1/images/charka.png");
+    auto drawWatermark = [&]()
+    {
+        if (watermark.isNull())
+            return;
+
+        qreal watermarkWidth = pageWidth * 0.75;
+        qreal watermarkHeight =
+                watermarkWidth * watermark.height()
+                / watermark.width();
+
+        QRectF watermarkRect(
+            (pageWidth - watermarkWidth) / 2,
+            (pageHeight - watermarkHeight) / 2,
+            watermarkWidth,
+            watermarkHeight
+        );
+
+        painter.save();
+        painter.setOpacity(0.50);  // 12% opacity
+        painter.drawImage(watermarkRect, watermark);
+        painter.restore();
+    };
+
     qDebug()<<"headers set successfully";
     // Fonts
     QFont normalFont("Times New Roman", 11);
@@ -10928,7 +11128,8 @@ void MainWindow::drawRelayTestTable(
             const QFont &font,
             const QColor &background)
     {
-        painter.fillRect(rect, background);
+        if (background != Qt::transparent)
+            painter.fillRect(rect, background);
 
         painter.setPen(Qt::black);
         painter.drawRect(rect);
@@ -10981,7 +11182,9 @@ void MainWindow::drawRelayTestTable(
     int currentRow = 0;
 
     // Draw table header on the first page
+    drawWatermark();
     drawTableHeader(y);
+
     qDebug()<<"header part completed";
     qDebug()<<"totalRows"<<totalRows;
 
@@ -11060,6 +11263,7 @@ void MainWindow::drawRelayTestTable(
 
             y = 0;
 
+            drawWatermark();
             // Repeat table header on the new page
             drawTableHeader(y);
         }
@@ -11078,7 +11282,7 @@ void MainWindow::drawRelayTestTable(
                 value = item->text();
 
 
-            QColor background = Qt::white;
+            QColor background = Qt::transparent;
             QFont cellFont = normalFont;
 
             // Result column: Pass / Fail

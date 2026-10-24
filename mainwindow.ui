@@ -56,7 +56,7 @@
     gridline-color: #d9d9d9;</string>
       </property>
       <property name="currentIndex">
-       <number>4</number>
+       <number>15</number>
       </property>
       <widget class="QWidget" name="page">
        <layout class="QGridLayout" name="gridLayout_2">
@@ -5560,7 +5560,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -5729,7 +5729,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -5874,7 +5874,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -5886,7 +5886,7 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
