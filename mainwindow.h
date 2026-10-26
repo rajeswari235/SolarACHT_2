@@ -270,8 +270,6 @@ private slots:
 
      void on_pushButton_getDetails_clicked();
 
-     void on_tabWidget_tabBarClicked(int index);
-
      void loadPatchTable(const QString &tableName);
 
      void loadHarnessTable(const QString &tableName);
@@ -439,6 +437,8 @@ private slots:
 
        void on_pushButton_openTwoWireFiles_clicked();
 
+       void on_pushButton_backFromGetDetails_clicked();
+
 public slots:
 
       void portStatus(const QString &data);
@@ -496,7 +496,7 @@ public slots:
               float measuredOhms,
               const QString &expected);
 
-
+       void onRelayNackReceived(quint8 relayId, int resultIndex);
 
 
 

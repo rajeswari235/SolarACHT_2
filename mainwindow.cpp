@@ -52,12 +52,28 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
 
-
     ui->comboBox_ports->addItems(test->availablePorts());
+
+    //Auto Port Detect Mechanism
+    QString detectedPort =
+            test->detectDevicePort();
+
+    if (!detectedPort.isEmpty())
+    {
+
+        ui->comboBox_ports
+                ->setCurrentText(detectedPort);
+
+        test->setPORTNAME(detectedPort);
+
+        qDebug() << "Auto connected to"
+                 << detectedPort;
+    }
+
     connect(ui->comboBox_ports,SIGNAL(activated(const QString &)),this,SLOT(onPortSelected(const QString &)));
     connect(test,&TestController::portOpening,this,&MainWindow::portStatus);
     connect(test,&TestController::executeWriteToNotes,this,&MainWindow::writeToNotes);
-     connect(ui->pushButton_refresh, &QPushButton::clicked, this, &MainWindow::refreshPorts);
+    connect(ui->pushButton_refresh, &QPushButton::clicked, this, &MainWindow::refreshPorts);
 
     test->welcome();
     resetLogFile();
@@ -107,7 +123,6 @@ MainWindow::MainWindow(QWidget *parent)
     ui->stackedWidget->setCurrentIndex(0);
 
     ui->lineEdit_newPassword->setEchoMode(QLineEdit::Password);
-
 
 
     // For Live Data Upload
@@ -297,6 +312,9 @@ MainWindow::MainWindow(QWidget *parent)
             &TestController::relayResultsCompleted,
             this,
             &MainWindow::onRelayResultsCompleted);
+
+    connect(test, &TestController::relayNackReceived,
+            this, &MainWindow::onRelayNackReceived);
 
 }
 MainWindow::~MainWindow()
@@ -2080,8 +2098,6 @@ void MainWindow::on_pushButton_getDetails_clicked()
 {
     QString tableName = ui->comboBox_fileNames->currentText();
 
-    ui->pushButton_patchCancel->hide();
-
     if (tableName.isEmpty())
     {
         QMessageBox::information(
@@ -2111,18 +2127,11 @@ void MainWindow::on_pushButton_getDetails_clicked()
 
     // Relay (optional)
     loadRelayTable(tableName + "_relay");
+    ui->label_fileName_relay->setText(tableName);
 
     // Diode (optional)
     loadDiodeTable(tableName + "_diode");
-}
-
-void MainWindow::on_tabWidget_tabBarClicked(int index)
-{
-    //Used as back button
-    if(index == 4)
-    {
-        ui->stackedWidget->setCurrentIndex(10);
-    }
+    ui->label_fileName_diode->setText(tableName);
 }
 
 void MainWindow::loadPatchTable(const QString &tableName)
@@ -2262,7 +2271,6 @@ void MainWindow::on_pushButton_revertChanges_clicked()
 
 void MainWindow::on_pushButton_patchEdit_clicked()
 {
-    ui->pushButton_patchCancel->setVisible(true);
     ui->tableView_patch->setEditTriggers(
                 QAbstractItemView::DoubleClicked |
                 QAbstractItemView::SelectedClicked |
@@ -4354,8 +4362,42 @@ void MainWindow::onRelayResultsCompleted()
 
     for (int row = 0; row < resultCount; ++row)
     {
-        const float measuredOhms =
-            m_relayMeasuredValues[row];
+
+        const float measuredOhms = m_relayMeasuredValues[row];
+
+        // NACK result: preserve the INVALID status already set in the table.
+        if (qIsNaN(measuredOhms))
+        {
+            // Ensure the table displays readable text, never "nan".
+            m_relayTestModel->setData(
+                m_relayTestModel->index(row, 11),
+                "INVALID");
+
+            // Keep the row marked as FAIL.
+            const QModelIndex resultIndex =
+                m_relayTestModel->index(row, 12);
+
+            m_relayTestModel->setData(resultIndex, "FAIL");
+
+            m_relayTestModel->setData(
+                resultIndex,
+                QBrush(QColor(255, 205, 205)),
+                Qt::BackgroundRole);
+
+            m_relayTestModel->setData(
+                m_relayTestModel->index(row, 13),
+                "NACK received");
+
+            writeToNotes(
+                QString("Relay Result %1 | Measured: INVALID | "
+                        "Expected: %2 | FAIL - NACK received")
+                    .arg(row + 1)
+                    .arg(m_relayTestModel->index(row, 9)
+                             .data().toString().trimmed()));
+
+            continue;
+        }
+
 
         // =================================================
         // 1. Convert measured value to readable format
@@ -4415,7 +4457,8 @@ void MainWindow::onRelayResultsCompleted()
         // =================================================
 
         const bool pass =
-            checkRelayExpected(measuredOhms, expected);
+            (expected.compare("INVALID", Qt::CaseInsensitive) != 0)
+            && checkRelayExpected(measuredOhms, expected);
 
         // =================================================
         // 5. Update PASS / FAIL
@@ -4600,6 +4643,118 @@ bool MainWindow::checkRelayExpected(
 
     return false;
 }
+
+
+
+void MainWindow::onRelayNackReceived(
+    quint8 relayId, int resultIndex)
+{
+    if (!m_relayTestModel)
+        return;
+
+    // Hardware IDs are zero-based; UI relay numbers start at 1.
+    const QString failedRelay =
+        QString("Relay_%1")
+            .arg(static_cast<int>(relayId) + 1);
+
+    const int totalRows = m_relayTestModel->rowCount();
+
+    if (resultIndex < 0 || resultIndex >= totalRows)
+        return;
+
+    // Find the first remaining row belonging to this relay,
+    // starting from the current result position.
+    int firstRow = -1;
+
+    for (int row = resultIndex; row < totalRows; ++row)
+    {
+        const QString relayName =
+            m_relayTestModel->index(row, 4)
+                .data().toString().simplified();
+
+        if (relayName == failedRelay ||
+            relayName.startsWith(
+                failedRelay + " ", Qt::CaseInsensitive))
+        {
+            firstRow = row;
+            break;
+        }
+    }
+
+    if (firstRow < 0)
+    {
+        qDebug() << "Could not find remaining rows for"
+                 << failedRelay
+                 << "starting at result index" << resultIndex;
+        return;
+    }
+
+    // Find the end of this contiguous relay group.
+    int endRow = firstRow;
+
+    while (endRow < totalRows)
+    {
+        const QString relayName =
+            m_relayTestModel->index(endRow, 4)
+                .data().toString().simplified();
+
+        if (relayName != failedRelay &&
+            !relayName.startsWith(
+                failedRelay + " ", Qt::CaseInsensitive))
+        {
+            break;
+        }
+
+        ++endRow;
+    }
+
+    // Mark remaining rows of this relay as INVALID.
+    for (int row = firstRow; row < endRow; ++row)
+    {
+        m_relayTestModel->setData(
+            m_relayTestModel->index(row, 11),
+            "INVALID");
+
+        const QModelIndex resultCell =
+            m_relayTestModel->index(row, 12);
+
+        m_relayTestModel->setData(resultCell, "FAIL");
+
+        m_relayTestModel->setData(
+            resultCell,
+            QBrush(QColor(255, 205, 205)),
+            Qt::BackgroundRole);
+
+        m_relayTestModel->setData(
+            m_relayTestModel->index(row, 13),
+            "NACK received");
+
+        if (row < m_relayMeasuredValues.size())
+        {
+            m_relayMeasuredValues[row] =
+                std::numeric_limits<float>::quiet_NaN();
+        }
+    }
+
+    // Advance over the failed relay's remaining displayed rows.
+    const int skippedRows = endRow - firstRow;
+
+    // Include any unfilled rows between the current result index
+    // and the matching relay row, if applicable.
+    const int totalAdvance = endRow - resultIndex;
+
+    test->skipRelayResultRows(totalAdvance);
+
+    ui->progressBar_RelayTest->setValue(
+        qMin(endRow, totalRows));
+
+    qDebug() << failedRelay
+             << "NACK received at result index:" << resultIndex
+             << "Rows marked INVALID:" << skippedRows
+             << "Result index advanced by:" << totalAdvance;
+}
+
+
 
 void MainWindow::populateInsulationTable(
     const QVector<InsulationTableNet> &nets,
@@ -5110,9 +5265,9 @@ bool MainWindow::validateRelayData(
         return false;
     }
 
-    // Expected resistance formats, same as Harness
+    // Expected resistance formats, same as Harness including OPEN and SHORT
     const QRegularExpression expRegex(
-        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s*±\s*[0-9]+[KM]?|[0-9]+-[0-9]+)$)",
+        R"(^(?:[<>][0-9]+[KM]?|[0-9]+[KM]?\s*±\s*[0-9]+[KM]?|[0-9]+-[0-9]+|OPEN|SHORT)$)",
         QRegularExpression::CaseInsensitiveOption);
 
     // Excitation voltage must be an integer from 1V to 34V
@@ -6273,6 +6428,34 @@ QVector<QByteArray> MainWindow::constructUARTPacketsForRelay(
             innerData.append(static_cast<char>(srcPinByte));
             innerData.append(static_cast<char>(dstConByte));
             innerData.append(static_cast<char>(dstPinByte));
+
+            // ExpValue: 0x00 = OPEN / >2
+            //           0x01 = SHORT / <2
+            const QString expValue = expected[i].trimmed();
+
+            quint8 expByte = 0xFF;
+
+            if (expValue.compare("OPEN", Qt::CaseInsensitive) == 0 ||
+                expValue == ">2")
+            {
+                expByte = 0x00;
+            }
+            else if (expValue.compare("SHORT", Qt::CaseInsensitive) == 0 ||
+                     expValue == "<2")
+            {
+                expByte = 0x01;
+            }
+            else
+            {
+                writeToNotes(
+                    QString("Relay packet error: Invalid contact ExpValue '%1' at row %2")
+                        .arg(expValue)
+                        .arg(i + 1));
+
+                return {};
+            }
+
+            innerData.append(static_cast<char>(expByte));
         }
 
         // The inner data length is uint8. Never split a group.
@@ -6537,16 +6720,66 @@ void MainWindow::populateRelayTestTable(
                     relayPins.compare("X1&X2", Qt::CaseInsensitive) == 0 ||
                     relayPins.compare("Y1&Y2", Qt::CaseInsensitive) == 0;
 
-                // Set expected value according to Relay condition
-                QString expectedValue = m["exp"].toString();
+                // Skip coil rows for ON condition
+                if (condition == "ON" && isCoil)
+                    continue;
 
-                if (!isCoil)
+                // Set expected value according to Relay condition
+
+                const QString expectedFromDb = m["exp"].toString().trimmed();
+
+                // Skip coil rows for ON condition
+                if (condition == "ON" && isCoil)
+                    continue;
+
+                QString expectedValue = expectedFromDb;
+
+                if (condition == "ON" && !isCoil)
                 {
-                    if (condition == "OFF")
-                        expectedValue = "<2";
-                    else if (condition == "ON")
-                        expectedValue = ">2";
+                    // Accept only the four valid expected-value forms.
+                    const bool isLessThan2 =
+                        expectedFromDb == "<2";
+
+                    const bool isGreaterThan2 =
+                        expectedFromDb == ">2";
+
+                    const bool isOpen =
+                        expectedFromDb.compare("OPEN", Qt::CaseInsensitive) == 0;
+
+                    const bool isShort =
+                        expectedFromDb.compare("SHORT", Qt::CaseInsensitive) == 0;
+
+                    if (isLessThan2 || isShort ||
+                        isGreaterThan2 || isOpen)
+                    {
+                        const QString pins =
+                            relayPins.toUpper().remove(' ');
+
+                        if (pins == "A2&A3" ||
+                            pins == "B2&B3" ||
+                            pins == "C2&C3" ||
+                            pins == "D2&D3")
+                        {
+                            expectedValue = ">2";
+                        }
+                        else if (pins == "A1&A2" ||
+                                 pins == "B1&B2" ||
+                                 pins == "C1&C2" ||
+                                 pins == "D1&D2")
+                        {
+                            expectedValue = "<2";
+                        }
+                        else
+                        {
+                            expectedValue = "INVALID";
+                        }
+                    }
+                    else
+                    {
+                        expectedValue = "INVALID";
+                    }
                 }
+
 
                 QStringList values = {
                     QString::number(serialNumber++),
@@ -7634,18 +7867,27 @@ void MainWindow::on_pushButton_delRow_clicked()
 void MainWindow::on_pushButton_addHarnessRow_clicked()
 {
     ui->tableView_harness->setEditTriggers(
-                QAbstractItemView::DoubleClicked |
-                QAbstractItemView::SelectedClicked |
-                QAbstractItemView::EditKeyPressed
-                );
+        QAbstractItemView::DoubleClicked |
+        QAbstractItemView::SelectedClicked |
+        QAbstractItemView::EditKeyPressed
+    );
 
+    // Always insert the new row at the end
     int row = harnessModel->rowCount();
 
     harnessModel->insertRow(row);
 
+    // Select and scroll to the newly inserted row
     ui->tableView_harness->selectRow(row);
 
-    ui->tableView_harness->scrollTo(harnessModel->index(row,0));
+    ui->tableView_harness->setCurrentIndex(
+        harnessModel->index(row, 0)
+    );
+
+    ui->tableView_harness->scrollTo(
+        harnessModel->index(row, 0),
+        QAbstractItemView::PositionAtCenter
+    );
 }
 
 void MainWindow::on_pushButton_delHarnessRow_clicked()
@@ -11175,4 +11417,10 @@ void MainWindow::on_pushButton_openTwoWireFiles_clicked()
        // Open the folder in File Explorer
        QDesktopServices::openUrl(
                    QUrl::fromLocalFile(folderPath));
+}
+
+
+void MainWindow::on_pushButton_backFromGetDetails_clicked()
+{
+     ui->stackedWidget->setCurrentWidget(ui->page_dataEntry);
 }

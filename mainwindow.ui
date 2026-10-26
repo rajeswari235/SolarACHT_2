@@ -56,7 +56,7 @@
     gridline-color: #d9d9d9;</string>
       </property>
       <property name="currentIndex">
-       <number>17</number>
+       <number>10</number>
       </property>
       <widget class="QWidget" name="page">
        <layout class="QGridLayout" name="gridLayout_2">
@@ -3701,11 +3701,14 @@ QPushButton:pressed
     color: rgb(0, 0, 0);
 }</string>
           </property>
+          <property name="tabPosition">
+           <enum>QTabWidget::North</enum>
+          </property>
           <property name="tabShape">
-           <enum>QTabWidget::Triangular</enum>
+           <enum>QTabWidget::Rounded</enum>
           </property>
           <property name="currentIndex">
-           <number>0</number>
+           <number>1</number>
           </property>
           <widget class="QWidget" name="tab_patch">
            <attribute name="title">
@@ -4176,7 +4179,7 @@ QPushButton:pressed
 }</string>
                   </property>
                   <property name="text">
-                   <string>Delete</string>
+                   <string>DELETE</string>
                   </property>
                  </widget>
                 </item>
@@ -4342,7 +4345,7 @@ QPushButton:pressed
             <string>Diode</string>
            </attribute>
            <layout class="QGridLayout" name="gridLayout_21">
-            <item row="0" column="0">
+            <item row="1" column="0">
              <widget class="QTableView" name="tableView_diode">
               <property name="styleSheet">
                <string notr="true">QTableView
@@ -4455,6 +4458,21 @@ QScrollBar::sub-page:horizontal
               </attribute>
              </widget>
             </item>
+            <item row="0" column="0">
+             <widget class="QLabel" name="label_fileName_diode">
+              <property name="font">
+               <font>
+                <pointsize>12</pointsize>
+               </font>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">border:none;</string>
+              </property>
+              <property name="text">
+               <string>TextLabel</string>
+              </property>
+             </widget>
+            </item>
            </layout>
           </widget>
           <widget class="QWidget" name="tab_relay">
@@ -4463,6 +4481,21 @@ QScrollBar::sub-page:horizontal
            </attribute>
            <layout class="QGridLayout" name="gridLayout_22">
             <item row="0" column="0">
+             <widget class="QLabel" name="label_fileName_relay">
+              <property name="font">
+               <font>
+                <pointsize>12</pointsize>
+               </font>
+              </property>
+              <property name="styleSheet">
+               <string notr="true">border:none;</string>
+              </property>
+              <property name="text">
+               <string>TextLabel</string>
+              </property>
+             </widget>
+            </item>
+            <item row="1" column="0">
              <widget class="QTableView" name="tableView_Relay">
               <property name="styleSheet">
                <string notr="true">QTableView
@@ -4577,11 +4610,60 @@ QScrollBar::sub-page:horizontal
             </item>
            </layout>
           </widget>
-          <widget class="QWidget" name="tab">
-           <attribute name="title">
-            <string>Back</string>
-           </attribute>
-          </widget>
+         </widget>
+        </item>
+        <item row="2" column="0">
+         <widget class="QPushButton" name="pushButton_backFromGetDetails">
+          <property name="font">
+           <font>
+            <pointsize>10</pointsize>
+            <weight>75</weight>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="styleSheet">
+           <string notr="true">QPushButton
+{
+    background: qlineargradient(
+        x1:0, y1:0,
+        x2:1, y2:0,
+        stop:0 #616161,
+        stop:1 #424242
+    );
+
+    color: white;
+    border: 1px solid #2c2c2c;
+    border-radius: 10px;
+    padding: 8px;
+    font-weight: bold;
+}
+
+QPushButton:hover
+{
+    background: qlineargradient(
+        x1:0, y1:0,
+        x2:1, y2:0,
+        stop:0 #757575,
+        stop:1 #545454
+    );
+}
+
+QPushButton:pressed
+{
+    background: qlineargradient(
+        x1:0, y1:0,
+        x2:1, y2:0,
+        stop:0 #4a4a4a,
+        stop:1 #303030
+    );
+
+    padding-top: 10px;
+    padding-left: 10px;
+}</string>
+          </property>
+          <property name="text">
+           <string>Back</string>
+          </property>
          </widget>
         </item>
        </layout>
