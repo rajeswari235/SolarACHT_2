@@ -99,6 +99,8 @@ MainWindow::MainWindow(QWidget *parent)
     ui->tableView_harness->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
     harnessModel->setEditStrategy(QSqlTableModel::OnManualSubmit);
     ui->tableView_harness->verticalHeader()->setVisible(true);
+    ui->tableView_harness->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->tableView_harness->setSelectionMode(QAbstractItemView::SingleSelection);
 
     // Relay model
     relayModel = new QSqlTableModel(this, db);
@@ -316,6 +318,10 @@ MainWindow::MainWindow(QWidget *parent)
     connect(test, &TestController::relayNackReceived,
             this, &MainWindow::onRelayNackReceived);
 
+    //Hiden elements
+    ui->doubleSpinBox_voltage->hide();
+    ui->checkBox_simulate->hide();
+
 }
 MainWindow::~MainWindow()
 {
@@ -331,19 +337,6 @@ void MainWindow::refreshPorts()
             test->availablePorts();
 
     ui->comboBox_ports->addItems(ports);
-
-//    QString detectedPort =
-//            serialObj->detectDevicePort();
-
-//    if (!detectedPort.isEmpty())
-//    {
-//        ui->comboBox_ports ->setCurrentText(detectedPort);
-
-//        serialObj->setPORTNAME(detectedPort);
-
-//        qDebug() << "Auto connected to"
-//                 << detectedPort;
-//    }
 }
 
 bool MainWindow::initializeDatabase()
@@ -2880,8 +2873,13 @@ void MainWindow::processTwoWireResults()
 
         float convertedMeasuredOhms =
                 measuredOhms
-                - (sourceCalibration +
-                   destinationCalibration);
+                - (sourceCalibration + destinationCalibration);
+
+        // Resistance cannot be negative.
+        if (convertedMeasuredOhms < 0.0f)
+        {
+            convertedMeasuredOhms = 0.02f;
+        }
 
         // =============================================
         // Log calibration calculation
@@ -2970,7 +2968,7 @@ void MainWindow::processTwoWireResults()
 
         bool pass =
                 checkTwoWireExpected(
-                    measuredOhms,
+                    convertedMeasuredOhms,
                     expected);
 
         // =============================================
@@ -4849,10 +4847,41 @@ void MainWindow::populateInsulationTable(
             new QStandardItem("-"));
 
         // Expected value
-        QString expValue =
-            ">" +
-            ui->doubleSpinBox_ResistanceThreshold
-                ->text();
+        double resistanceThreshold =
+                ui->doubleSpinBox_ResistanceThreshold->value();
+
+        QString formattedThreshold;
+
+        if (resistanceThreshold >= 1000000000.0)
+        {
+            formattedThreshold =
+                    QString::number(
+                        resistanceThreshold / 1000000000.0,
+                        'f', 3) + "GΩ";
+        }
+        else if (resistanceThreshold >= 1000000.0)
+        {
+            formattedThreshold =
+                    QString::number(
+                        resistanceThreshold / 1000000.0,
+                        'f', 3) + "MΩ";
+        }
+        else if (resistanceThreshold >= 1000.0)
+        {
+            formattedThreshold =
+                    QString::number(
+                        resistanceThreshold / 1000.0,
+                        'f', 3) + "KΩ";
+        }
+        else
+        {
+            formattedThreshold =
+                    QString::number(
+                        resistanceThreshold,
+                        'f', 3) + "Ω";
+        }
+
+        QString expValue = ">" + formattedThreshold;
 
         row.append(
             new QStandardItem(expValue));
