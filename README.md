@@ -103,4 +103,7 @@ Ver 3.6 ------------------------------------------------------------------------
 Ver 3.7 -----------------------------------------------------------------------------------
 - Small GUI Changes hiding elements and removing negatives in resistances.
 
+Ver 3.8 ----------------------------------------------------------------------------------
+- Completed Get Details All Tables Buttons and Edit Strategy.
+
 

@@ -83,49 +83,56 @@ MainWindow::MainWindow(QWidget *parent)
 
     writeToNotes("Pointer Size: "+QString::number(sizeof(void *))+" If it is 8 : 64 bit else 4 means 32 bit");
 
+    //showMaximized();
+
     initializeDatabase();
+    // =========================================================
+    // Patch Model
+    // =========================================================
+    patchModel = new QSqlTableModel(this, db);
 
-    //patch model
-    patchModel = new QSqlTableModel(this,db);
-    ui->tableView_patch->setModel(patchModel);
-    ui->tableView_patch->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    patchModel->setEditStrategy(QSqlTableModel::OnManualSubmit);
-    ui->tableView_patch->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tableView_patch->setSelectionMode(QAbstractItemView::SingleSelection);
+    setupSqlTableView(
+        ui->tableView_patch,
+        patchModel);
 
-    //harness model
-    harnessModel = new QSqlTableModel(this,db);
-    ui->tableView_harness->setModel(harnessModel);
-    ui->tableView_harness->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-    harnessModel->setEditStrategy(QSqlTableModel::OnManualSubmit);
-    ui->tableView_harness->verticalHeader()->setVisible(true);
-    ui->tableView_harness->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tableView_harness->setSelectionMode(QAbstractItemView::SingleSelection);
 
-    // Relay model
+    // =========================================================
+    // Harness Model
+    // =========================================================
+    harnessModel = new QSqlTableModel(this, db);
+
+    setupSqlTableView(
+        ui->tableView_harness,
+        harnessModel);
+
+
+    // =========================================================
+    // Relay Model
+    // =========================================================
     relayModel = new QSqlTableModel(this, db);
-    ui->tableView_Relay->setModel(relayModel);
-    ui->tableView_Relay->horizontalHeader()->setSectionResizeMode(
-        QHeaderView::Stretch);
-    ui->tableView_Relay->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    ui->tableView_Relay->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tableView_Relay->setSelectionMode(QAbstractItemView::SingleSelection);
-    ui->tableView_Relay->verticalHeader()->setVisible(true);
 
-    // Diode model
+    setupSqlTableView(
+        ui->tableView_Relay,
+        relayModel);
+
+
+    // =========================================================
+    // Diode Model
+    // =========================================================
     diodeModel = new QSqlTableModel(this, db);
-    ui->tableView_diode->setModel(diodeModel);
-    ui->tableView_diode->horizontalHeader()->setSectionResizeMode(
-        QHeaderView::Stretch);
-    ui->tableView_diode->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    ui->tableView_diode->setSelectionBehavior(QAbstractItemView::SelectRows);
-    ui->tableView_diode->setSelectionMode(QAbstractItemView::SingleSelection);
-    ui->tableView_diode->verticalHeader()->setVisible(true);
 
+    setupSqlTableView(
+        ui->tableView_diode,
+        diodeModel);
+
+
+    // =========================================================
+    // Other UI Initialization
+    // =========================================================
     ui->stackedWidget->setCurrentIndex(0);
 
-    ui->lineEdit_newPassword->setEchoMode(QLineEdit::Password);
-
+    ui->lineEdit_newPassword->setEchoMode(
+        QLineEdit::Password);
 
     // For Live Data Upload
     connect(test,
@@ -318,7 +325,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(test, &TestController::relayNackReceived,
             this, &MainWindow::onRelayNackReceived);
 
-    //Hiden elements
+    //Hidden elements
     ui->doubleSpinBox_voltage->hide();
     ui->checkBox_simulate->hide();
 
@@ -2087,6 +2094,7 @@ void MainWindow::on_pushButton_backToModes_clicked()
     ui->stackedWidget->setCurrentIndex(4);
 }
 
+
 void MainWindow::on_pushButton_getDetails_clicked()
 {
     QString tableName = ui->comboBox_fileNames->currentText();
@@ -2107,25 +2115,24 @@ void MainWindow::on_pushButton_getDetails_clicked()
         return;
     }
 
-    ui->tabWidget->setCurrentIndex(0);
-    ui->stackedWidget->setCurrentIndex(11);
-
-    // Patch
+    // Load tables
     loadPatchTable(tableName + "_patch");
     ui->label_fileName->setText(tableName);
 
-    // Harness
     loadHarnessTable(tableName + "_harness");
     ui->label_fileNameH->setText(tableName);
 
-    // Relay (optional)
     loadRelayTable(tableName + "_relay");
     ui->label_fileName_relay->setText(tableName);
 
-    // Diode (optional)
     loadDiodeTable(tableName + "_diode");
     ui->label_fileName_diode->setText(tableName);
+
+    ui->tabWidget->setCurrentIndex(0);
+    ui->stackedWidget->setCurrentIndex(11);
+
 }
+
 
 void MainWindow::loadPatchTable(const QString &tableName)
 {
@@ -2233,65 +2240,125 @@ void MainWindow::loadHarnessTable(const QString &tableName)
 
 void MainWindow::on_pushButton_editTableView_clicked()
 {
-    ui->tableView_harness->setEditTriggers(
-                QAbstractItemView::DoubleClicked |
-                QAbstractItemView::SelectedClicked |
-                QAbstractItemView::EditKeyPressed
-                );
+    ui->tableView_harness->setEditingEnabled(true);
+
     QMessageBox::information(this,"Editable","Now you can edit table");
 }
 
 void MainWindow::on_pushButton_saveChanges_clicked()
 {
+    // Step 1: Refresh Patch references from the visible Patch table.
+    if (!refreshPatchValidationLists())
+        return;
 
-    if(harnessModel->submitAll())
+    // Step 2: Extract current Harness model rows.
+    QVector<QString> cableTemp;
+    QVector<QString> sourceConTemp, sourcePinTemp;
+    QVector<QString> destConTemp, destPinTemp;
+    QVector<QString> expTemp;
+
+    for (int row = 0; row < harnessModel->rowCount(); ++row)
     {
-        QMessageBox::information(this,"Success", "Changes saved successfully");
-        // Disable editing again
-        ui->tableView_harness->setEditTriggers(QAbstractItemView::NoEditTriggers);
+        cableTemp.append(
+            harnessModel->index(row, 1).data().toString().trimmed());
+
+        sourceConTemp.append(
+            harnessModel->index(row, 2).data().toString().trimmed());
+
+        sourcePinTemp.append(
+            harnessModel->index(row, 3).data().toString().trimmed());
+
+        destConTemp.append(
+            harnessModel->index(row, 4).data().toString().trimmed());
+
+        destPinTemp.append(
+            harnessModel->index(row, 5).data().toString().trimmed());
+
+        expTemp.append(
+            harnessModel->index(row, 6).data().toString().trimmed());
+    }
+
+    // Step 3: Run existing validation rules.
+    if (!validateHarnessData(
+            cableTemp,
+            sourceConTemp, sourcePinTemp,
+            destConTemp, destPinTemp,
+            expTemp))
+    {
+        QMessageBox::warning(
+               this,
+               "Validation Failed",
+               "Harness data validation failed.\n\n"
+               "Please check the Error Log page for details.");
+
+        // Navigate to the Error Log page after the popup closes.
+           ui->stackedWidget->setCurrentWidget(ui->page_dataEntry);
+
+        return;
+    }
+
+    // Step 4: Save only after validation succeeds.
+    if (harnessModel->submitAll())
+    {
+        QMessageBox::information(
+            this, "Success", "Changes saved successfully");
+
+        ui->tableView_harness->setEditingEnabled(false);
     }
     else
     {
-        QMessageBox::warning(this,"Error",harnessModel->lastError().text());
+        QMessageBox::warning(
+            this, "Error", harnessModel->lastError().text());
     }
 }
 
 void MainWindow::on_pushButton_revertChanges_clicked()
 {
     harnessModel->revertAll();
-    ui->tableView_harness->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ui->tableView_harness->setEditingEnabled(false);
 }
 
 void MainWindow::on_pushButton_patchEdit_clicked()
 {
-    ui->tableView_patch->setEditTriggers(
-                QAbstractItemView::DoubleClicked |
-                QAbstractItemView::SelectedClicked |
-                QAbstractItemView::EditKeyPressed
-                );
-    QMessageBox::information(this,"Editable","Now you can edit table");
+    ui->tableView_patch->setEditingEnabled(true);
+
+    QMessageBox::information(
+        this, "Editable", "Now you can edit table");
 }
 
 void MainWindow::on_pushButton_patchSave_clicked()
 {
+    if (!savePatchDisplayChanges())
+    {
+        ui->stackedWidget->setCurrentWidget(ui->page_dataEntry);
+        return;
+    }
 
-    if(patchModel->submitAll())
-    {
-        patchModel->select();
-        QMessageBox::information(this,"Success","Changes saved successfully");
-        // Disable editing again
-        ui->tableView_patch->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    }
-    else
-    {
-        QMessageBox::warning(this, "Error", patchModel->lastError().text());
-    }
+    const QString tableName = patchModel->tableName();
+
+    // Reload both models from the committed database values.
+    loadPatchTable(tableName);
+
+   ui->tableView_patch->setEditingEnabled(false);
+
+    QMessageBox::information(
+        this, "Success", "Patch changes saved successfully.");
 }
 
 void MainWindow::on_pushButton_patchCancel_clicked()
 {
+    const QString tableName = patchModel->tableName();
+
+    // Discard any pending SQL-model changes.
     patchModel->revertAll();
-    ui->tableView_patch->setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+    // Rebuild the visible model from the database.
+    loadPatchTable(tableName);
+
+    ui->tableView_patch->setEditingEnabled(false);
+
+    QMessageBox::information(
+        this, "Cancelled", "Patch changes have been discarded.");
 }
 
 void MainWindow::on_pushButton_delCable_clicked()
@@ -4361,7 +4428,7 @@ void MainWindow::onRelayResultsCompleted()
     for (int row = 0; row < resultCount; ++row)
     {
 
-        const float measuredOhms = m_relayMeasuredValues[row];
+        float measuredOhms = m_relayMeasuredValues[row];
 
         // NACK result: preserve the INVALID status already set in the table.
         if (qIsNaN(measuredOhms))
@@ -4396,6 +4463,11 @@ void MainWindow::onRelayResultsCompleted()
             continue;
         }
 
+        // Resistance cannot be negative.
+        if (measuredOhms < 0.0f)
+        {
+            measuredOhms = 0.02f;
+        }
 
         // =================================================
         // 1. Convert measured value to readable format
@@ -5584,6 +5656,7 @@ bool MainWindow::validateRelayData(
 }
 
 
+
 bool MainWindow::saveRelayToDb(
     const QString &cableName,
     const QVector<QString> &cableTemp,
@@ -5599,8 +5672,7 @@ bool MainWindow::saveRelayToDb(
     const int count = cableTemp.size();
 
     // Validate vector sizes.
-    if (count == 0 ||
-        sourceConTemp.size() != count ||
+    if (sourceConTemp.size() != count ||
         sourcePinTemp.size() != count ||
         relaySideConTemp.size() != count ||
         relaySideRSPinsTemp.size() != count ||
@@ -5609,128 +5681,145 @@ bool MainWindow::saveRelayToDb(
         excitationVoltageTemp.size() != count ||
         expTemp.size() != count)
     {
-        writeToNotes("❌ Relay data vectors have inconsistent sizes.");
+        const QString error =
+            "Relay data vectors have inconsistent sizes.";
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
     if (!db.isOpen())
     {
-        writeToNotes("❌ Database is not open.");
+        const QString error = "Database is not open.";
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
-    const QString tableName = cableName + "_relay";
+    // Same table naming convention as Diode and Harness.
+    QString tableName = cableName + "_relay";
+    tableName.replace(" ", "_");
 
-    static const QRegularExpression validIdentifier(
-        R"(^[A-Za-z0-9_]+$)");
+    QSqlQuery q(db);
 
-    if (!validIdentifier.match(tableName).hasMatch())
-    {
-        writeToNotes("❌ Invalid Relay table name.");
-        return false;
-    }
-
-    QSqlQuery query(db);
-
-    // Create the table if it does not exist.
+    // Create table if it does not exist.
     const QString createSql =
-        QString(R"(
-            CREATE TABLE IF NOT EXISTS "%1" (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cable TEXT,
-                sourceCon TEXT,
-                sourcePin TEXT,
-                relaySideCon TEXT,
-                relaySideRSPins TEXT,
-                destCon TEXT,
-                destPin TEXT,
-                excitationVoltage TEXT,
-                exp TEXT
-            )
-        )").arg(tableName);
+        "CREATE TABLE IF NOT EXISTS \"" + tableName + "\" ("
+        "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+        "cable TEXT,"
+        "sourceCon TEXT,"
+        "sourcePin TEXT,"
+        "relaySideCon TEXT,"
+        "relaySideRSPins TEXT,"
+        "destCon TEXT,"
+        "destPin TEXT,"
+        "excitationVoltage TEXT,"
+        "exp TEXT"
+        ")";
 
-    if (!query.exec(createSql))
+    if (!q.exec(createSql))
     {
-        writeToNotes(
-            "❌ Failed to create Relay table: " +
-            query.lastError().text());
+        const QString error =
+            "Failed to create Relay table " + tableName + ": " +
+            q.lastError().text();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
-    // Start transaction.
+    // Start transaction before clearing existing records.
     if (!db.transaction())
     {
-        writeToNotes(
-            "❌ Failed to start Relay transaction: " +
-            db.lastError().text());
+        const QString error =
+            "Failed to start Relay transaction: " +
+            db.lastError().text();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
-    // Insert Relay data without deleting existing records.
-    const QString insertSql =
-        QString(R"(
-            INSERT INTO "%1" (
-                cable,
-                sourceCon,
-                sourcePin,
-                relaySideCon,
-                relaySideRSPins,
-                destCon,
-                destPin,
-                excitationVoltage,
-                exp
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        )").arg(tableName);
-
-    if (!query.prepare(insertSql))
+    // Clear existing records, just like Diode and Harness.
+    if (!q.exec("DELETE FROM \"" + tableName + "\""))
     {
-        writeToNotes(
-            "❌ Relay prepare failed: " +
-            query.lastError().text());
+        const QString error =
+            "Failed to clear Relay table " + tableName + ": " +
+            q.lastError().text();
 
         db.rollback();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    const QString insertSql =
+        "INSERT INTO \"" + tableName + "\" ("
+        "cable, sourceCon, sourcePin, relaySideCon, "
+        "relaySideRSPins, destCon, destPin, "
+        "excitationVoltage, exp"
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    if (!q.prepare(insertSql))
+    {
+        const QString error =
+            "Failed to prepare Relay insert: " +
+            q.lastError().text();
+
+        db.rollback();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
     for (int i = 0; i < count; ++i)
     {
-        query.bindValue(0, cableTemp[i]);
-        query.bindValue(1, sourceConTemp[i]);
-        query.bindValue(2, sourcePinTemp[i]);
-        query.bindValue(3, relaySideConTemp[i]);
-        query.bindValue(4, relaySideRSPinsTemp[i]);
-        query.bindValue(5, destConTemp[i]);
-        query.bindValue(6, destPinTemp[i]);
-        query.bindValue(7, excitationVoltageTemp[i]);
-        query.bindValue(8, expTemp[i]);
+        q.bindValue(0, cableTemp[i]);
+        q.bindValue(1, sourceConTemp[i]);
+        q.bindValue(2, sourcePinTemp[i]);
+        q.bindValue(3, relaySideConTemp[i]);
+        q.bindValue(4, relaySideRSPinsTemp[i]);
+        q.bindValue(5, destConTemp[i]);
+        q.bindValue(6, destPinTemp[i]);
+        q.bindValue(7, excitationVoltageTemp[i]);
+        q.bindValue(8, expTemp[i]);
 
-        if (!query.exec())
+        if (!q.exec())
         {
-            writeToNotes(
-                QString("❌ Relay insert failed at row %1: %2")
+            const QString error =
+                QString("Relay insert failed at row %1: %2")
                     .arg(i + 1)
-                    .arg(query.lastError().text()));
+                    .arg(q.lastError().text());
 
             db.rollback();
+
+            writeToNotes("❌ " + error);
+            ui->textEdit_ErrorLog->append("❌ " + error);
             return false;
         }
     }
 
     if (!db.commit())
     {
-        writeToNotes(
-            "❌ Relay commit failed: " +
-            db.lastError().text());
+        const QString error =
+            "Failed to commit Relay transaction: " +
+            db.lastError().text();
 
         db.rollback();
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
         return false;
     }
 
     writeToNotes(
-        QString("✅ Saved %1 Relay rows to table: %2")
-            .arg(count)
-            .arg(tableName));
+        QString("✅ Relay data stored in table: %1 (%2 rows)")
+            .arg(tableName)
+            .arg(count));
 
     return true;
 }
@@ -6865,8 +6954,735 @@ void MainWindow::populateRelayTestTable(
         QString("Relay table populated: %1 database rows, "
                 "%2 display rows.")
             .arg(relayData.size())
-            .arg(m_relayTestModel->rowCount()));
+                .arg(m_relayTestModel->rowCount()));
 }
+
+void MainWindow::setupSqlTableView(
+        QTableView *tableView,
+        QSqlTableModel *model)
+{
+    if (!tableView || !model)
+        return;
+
+    // =====================================================
+    // 1. Database Model Configuration
+    // =====================================================
+
+    // Changes are committed only when submitAll() is called.
+    model->setEditStrategy(
+        QSqlTableModel::OnManualSubmit);
+
+    // Assign model to table view.
+    tableView->setModel(model);
+
+    // =====================================================
+    // 2. Column Configuration
+    // =====================================================
+
+    // Stretch columns to fill available table width.
+    tableView->horizontalHeader()->setSectionResizeMode(
+        QHeaderView::Stretch);
+
+    // =====================================================
+    // 3. Editing Configuration
+    // =====================================================
+
+    // Disable editing by default.
+    tableView->setEditTriggers(
+        QAbstractItemView::NoEditTriggers);
+
+    // =====================================================
+    // 4. Selection Configuration
+    // =====================================================
+
+    // Select entire rows.
+    tableView->setSelectionBehavior(
+        QAbstractItemView::SelectRows);
+
+    // Allow only one row to be selected.
+    tableView->setSelectionMode(
+        QAbstractItemView::SingleSelection);
+
+    // =====================================================
+    // 5. Vertical Header Configuration
+    // =====================================================
+
+    // Show row numbers.
+    tableView->verticalHeader()->setVisible(true);
+
+    // =====================================================
+    // 6. Text Wrapping Configuration
+    // =====================================================
+
+    // Wrap long cell text onto multiple lines.
+    tableView->setWordWrap(true);
+
+    // Do not truncate text with "...".
+    tableView->setTextElideMode(
+        Qt::ElideNone);
+
+    // Automatically increase row height for wrapped text.
+    tableView->verticalHeader()->setSectionResizeMode(
+                QHeaderView::ResizeToContents);
+}
+
+bool MainWindow::refreshPatchValidationLists()
+{
+    QStandardItemModel *displayModel =
+        qobject_cast<QStandardItemModel *>(
+            ui->tableView_patch->model());
+
+    if (!displayModel || displayModel->rowCount() == 0)
+    {
+        const QString error =
+            "Patch table is unavailable or contains no rows. "
+            "Cannot validate connector/pin references.";
+
+        writeToNotes("❌ " + error);
+        ui->textEdit_ErrorLog->append("❌ " + error);
+        return false;
+    }
+
+    // Rebuild the lists from the CURRENT visible Patch table.
+    userConList.clear();
+    userPinList.clear();
+
+    for (int row = 0; row < displayModel->rowCount(); ++row)
+    {
+        userConList.append(
+            displayModel->index(row, 2).data().toString().trimmed());
+
+        userPinList.append(
+            displayModel->index(row, 3).data().toString().trimmed());
+    }
+
+    return true;
+}
+
+bool MainWindow::savePatchDisplayChanges()
+{
+    QStandardItemModel *displayModel =
+        qobject_cast<QStandardItemModel *>(
+            ui->tableView_patch->model());
+
+    if (!displayModel || patchModel->tableName().isEmpty())
+    {
+        QMessageBox::warning(
+            this, "Error", "Patch table is not loaded.");
+        return false;
+    }
+
+    const int displayRows = displayModel->rowCount();
+
+    if (displayRows == 0)
+    {
+        QMessageBox::warning(
+            this, "Error", "Patch table cannot be empty.");
+        return false;
+    }
+
+    // Fetch every database row before matching by ID.
+    while (patchModel->canFetchMore())
+        patchModel->fetchMore();
+
+    // Validate and convert visible values before modifying SQL model.
+    struct PatchRow
+    {
+        QString id;
+        QString cable;
+        QString userCon;
+        QString userPin;
+        QString patchCon;
+        int patchPin;
+    };
+
+    QVector<PatchRow> rows;
+    QSet<QString> displayIds;
+
+    for (int row = 0; row < displayRows; ++row)
+    {
+        PatchRow item;
+
+        item.id =
+            displayModel->index(row, 0).data().toString().trimmed();
+
+        item.cable =
+            displayModel->index(row, 1).data().toString().trimmed();
+
+        item.userCon =
+            displayModel->index(row, 2).data().toString().trimmed();
+
+        item.userPin =
+            displayModel->index(row, 3).data().toString().trimmed();
+
+        const QString logicalCon =
+            displayModel->index(row, 4).data().toString().trimmed();
+
+        const QString logicalPin =
+            displayModel->index(row, 5).data().toString().trimmed();
+
+        if (item.cable.isEmpty() ||
+            item.userCon.isEmpty() ||
+            item.userPin.isEmpty())
+        {
+            QMessageBox::warning(
+                this, "Validation Failed",
+                QString("Empty required field in Patch row %1.")
+                    .arg(row + 1));
+            return false;
+        }
+
+        if (!convertLogicalPatchToDatabase(
+                logicalCon,
+                logicalPin,
+                item.patchCon,
+                item.patchPin))
+        {
+            QMessageBox::warning(
+                this, "Validation Failed",
+                QString("Invalid Patch connector or pin in row %1.\n"
+                        "Connector must be TP-1 to TP-15 and pin 1 to 128.")
+                    .arg(row + 1));
+            return false;
+        }
+
+        if (!item.id.isEmpty())
+        {
+            if (displayIds.contains(item.id))
+            {
+                QMessageBox::warning(
+                    this, "Validation Failed",
+                    "Duplicate Patch row ID detected.");
+                return false;
+            }
+
+            displayIds.insert(item.id);
+        }
+
+        rows.append(item);
+    }
+
+    // Map existing database IDs to their current model row positions.
+    QHash<QString, int> databaseRows;
+
+    for (int row = 0; row < patchModel->rowCount(); ++row)
+    {
+        const QString id =
+            patchModel->index(row, 0).data().toString();
+
+        databaseRows.insert(id, row);
+    }
+
+    // Remove database rows deleted from the visible model.
+    for (int row = patchModel->rowCount() - 1; row >= 0; --row)
+    {
+        const QString id =
+            patchModel->index(row, 0).data().toString();
+
+        if (!displayIds.contains(id))
+        {
+            if (!patchModel->removeRow(row))
+            {
+                QMessageBox::warning(
+                    this, "Error",
+                    "Unable to mark a Patch row for deletion.");
+                patchModel->revertAll();
+                return false;
+            }
+        }
+    }
+
+    // Update existing rows or insert new rows.
+    for (const PatchRow &item : rows)
+    {
+        int dbRow = -1;
+
+        if (!item.id.isEmpty())
+            dbRow = databaseRows.value(item.id, -1);
+
+        if (dbRow >= 0)
+        {
+            // Update the existing database-model row.
+            patchModel->setData(
+                patchModel->index(dbRow, 1), item.cable);
+
+            patchModel->setData(
+                patchModel->index(dbRow, 2), item.userCon);
+
+            patchModel->setData(
+                patchModel->index(dbRow, 3), item.userPin);
+
+            patchModel->setData(
+                patchModel->index(dbRow, 4), item.patchCon);
+
+            patchModel->setData(
+                patchModel->index(dbRow, 5), item.patchPin);
+        }
+        else
+        {
+            // New visible row: insert into the SQL model.
+            const int newRow = patchModel->rowCount();
+
+            if (!patchModel->insertRow(newRow))
+            {
+                QMessageBox::warning(
+                    this, "Error",
+                    "Unable to insert a new Patch row.");
+
+                patchModel->revertAll();
+                return false;
+            }
+
+            patchModel->setData(
+                patchModel->index(newRow, 1), item.cable);
+
+            patchModel->setData(
+                patchModel->index(newRow, 2), item.userCon);
+
+            patchModel->setData(
+                patchModel->index(newRow, 3), item.userPin);
+
+            patchModel->setData(
+                patchModel->index(newRow, 4), item.patchCon);
+
+            patchModel->setData(
+                patchModel->index(newRow, 5), item.patchPin);
+        }
+    }
+
+    // Commit all pending database-model changes.
+    if (!patchModel->submitAll())
+    {
+        const QString error = patchModel->lastError().text();
+
+        patchModel->revertAll();
+
+        QMessageBox::warning(
+            this, "Database Error", error);
+
+        return false;
+    }
+
+    return true;
+}
+
+bool MainWindow::convertLogicalPatchToDatabase(
+    const QString &logicalCon,
+    const QString &logicalPin,
+    QString &dbCon,
+    int &dbPin)
+{
+    static const QRegularExpression conRegex(
+        R"(^TP-?(?:[1-9]|1[0-5])$)",
+        QRegularExpression::CaseInsensitiveOption);
+
+    if (!conRegex.match(logicalCon.trimmed()).hasMatch())
+        return false;
+
+    bool ok = false;
+
+    const int tpNo =
+        logicalCon.trimmed().section('-', 1).toInt(&ok);
+
+    if (!ok || tpNo < 1 || tpNo > 15)
+        return false;
+
+    const int pin = logicalPin.trimmed().toInt(&ok);
+
+    if (!ok || pin < 1 || pin > 128)
+        return false;
+
+    int physicalTp = 0;
+    int physicalPin = pin;
+
+    // EXACT existing conversion rule.
+    if (pin <= 64)
+    {
+        physicalTp = (tpNo * 2) - 1;
+    }
+    else
+    {
+        if (tpNo == 15)
+            physicalTp = 31;
+        else
+            physicalTp = tpNo * 2;
+
+        physicalPin -= 64;
+    }
+
+    dbCon = QString("TP-%1").arg(physicalTp);
+    dbPin = physicalPin;
+
+    return true;
+}
+
+
+bool MainWindow::exportTableToExcel(QTableView *tableView,
+                                    const QString &fileSuffix)
+{
+    if (!tableView || !tableView->model()) {
+        QMessageBox::warning(this, "Export Error",
+                             "Table model is not available.");
+        return false;
+    }
+
+    // Desktop/ImportsExports_ACHT
+    QString desktopPath =
+        QStandardPaths::writableLocation(
+            QStandardPaths::DesktopLocation);
+
+    if (desktopPath.isEmpty()) {
+        QMessageBox::warning(this, "Export Error",
+                             "Unable to locate Desktop folder.");
+        return false;
+    }
+
+    const QString folderPath =
+        QDir(desktopPath).filePath("ImportsExports_ACHT");
+
+    QDir dir;
+    if (!dir.mkpath(folderPath)) {
+        QMessageBox::warning(this, "Export Error",
+                             "Unable to create export folder.");
+        return false;
+    }
+
+    // Timestamped filename
+    const QString timestamp =
+        QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss");
+
+    const QString filePath =
+        QDir(folderPath).filePath(
+            timestamp + "_" + fileSuffix + ".xlsx");
+
+    QXlsx::Document xlsx;
+
+    QAbstractItemModel *model = tableView->model();
+
+    // Export visible rows and columns; no headers.
+    int excelRow = 1;
+
+    for (int row = 0; row < model->rowCount(); ++row) {
+        if (tableView->isRowHidden(row))
+            continue;
+
+        int excelCol = 1;
+
+        for (int col = 0; col < model->columnCount(); ++col) {
+            if (tableView->isColumnHidden(col))
+                continue;
+
+            const QModelIndex index = model->index(row, col);
+
+            if (!index.isValid())
+                continue;
+
+            xlsx.write(excelRow, excelCol,
+                       index.data(Qt::DisplayRole));
+            ++excelCol;
+        }
+
+        ++excelRow;
+    }
+
+    if (!xlsx.saveAs(filePath)) {
+        QMessageBox::warning(this, "Export Error",
+                             "Failed to save Excel file:\n" + filePath);
+        return false;
+    }
+
+    QMessageBox::information(
+        this, "Export Successful",
+        "Excel file exported successfully:\n" + filePath);
+
+    return true;
+}
+
+
+bool MainWindow::importTableFromExcel(
+    QTableView *tableView,
+    const QString &tableSuffix,
+    const QStringList &columns,
+    bool isPatchTable)
+{
+    if (!db.isOpen()) {
+        QMessageBox::warning(this, "Import Error",
+                             "Database is not open.");
+        return false;
+    }
+
+    const QString cableName =
+        ui->comboBox_fileNames->currentText().trimmed();
+
+    if (cableName.isEmpty()) {
+        QMessageBox::warning(this, "Import Error",
+                             "Please select a cable first.");
+        return false;
+    }
+
+    QString tableName = cableName + tableSuffix;
+    tableName.replace(" ", "_");
+
+    static const QRegularExpression validIdentifier(
+        "^[A-Za-z0-9_]+$");
+
+    if (!validIdentifier.match(tableName).hasMatch()) {
+        QMessageBox::warning(this, "Import Error",
+                             "Invalid destination table name.");
+        return false;
+    }
+
+    const QString desktopPath =
+        QStandardPaths::writableLocation(
+            QStandardPaths::DesktopLocation);
+
+    const QString folderPath =
+        QDir(desktopPath).filePath("ImportsExports_ACHT");
+
+    QDir().mkpath(folderPath);
+
+    QString filePath = QFileDialog::getOpenFileName(
+        this,
+        "Import Excel File",
+        QDir(folderPath).exists() ? folderPath : desktopPath,
+        "Excel Files (*.xlsx)");
+
+    if (filePath.isEmpty())
+        return false;
+
+    QXlsx::Document xlsx(filePath);
+
+    if (!xlsx.load()) {
+        QMessageBox::warning(this, "Import Error",
+                             "Unable to open the selected Excel file.");
+        return false;
+    }
+
+    const QXlsx::CellRange range = xlsx.dimension();
+
+    if (!range.isValid() || range.rowCount() == 0) {
+        QMessageBox::warning(this, "Import Error",
+                             "The Excel file contains no data.");
+        return false;
+    }
+
+    const int expectedColumns = columns.size();
+
+    if (range.firstColumn() != 1 ||
+        range.columnCount() != expectedColumns) {
+        QMessageBox::warning(
+            this, "Import Error",
+            QString("Incorrect Excel column count.\n"
+                    "Expected: %1\nFound: %2")
+                .arg(expectedColumns)
+                .arg(range.columnCount()));
+        return false;
+    }
+
+    // Read all Excel rows before modifying the database.
+    QVector<QStringList> importedRows;
+
+    for (int row = range.firstRow();
+         row <= range.lastRow(); ++row) {
+
+        QStringList values;
+
+        for (int col = 1; col <= expectedColumns; ++col) {
+            values.append(xlsx.read(row, col).toString().trimmed());
+        }
+
+        bool allEmpty = true;
+
+        for (const QString &value : values) {
+            if (!value.isEmpty()) {
+                allEmpty = false;
+                break;
+            }
+        }
+
+        if (allEmpty)
+            continue;
+
+
+        if (isPatchTable) {
+            // Excel columns:
+            // 0 = cable, 1 = userCon, 2 = userPin,
+            // 3 = logical patchCon, 4 = logical patchPin.
+
+            const QString logicalCon = values[3];
+            const QString logicalPin = values[4];
+
+            static const QRegularExpression patchConRegex(
+                "^TP-?(?:[1-9]|1[0-5])$",
+                QRegularExpression::CaseInsensitiveOption);
+
+            if (!patchConRegex.match(logicalCon).hasMatch()) {
+                QMessageBox::warning(
+                    this, "Patch Import Error",
+                    QString("Invalid Patch connector at Excel row %1: %2")
+                        .arg(row)
+                        .arg(logicalCon));
+                return false;
+            }
+
+            bool tpOk = false;
+            bool pinOk = false;
+
+            const int tpNo =
+                logicalCon.section('-', 1).toInt(&tpOk);
+
+            const int pin = logicalPin.toInt(&pinOk);
+
+            if (!tpOk || tpNo < 1 || tpNo > 15 ||
+                !pinOk || pin < 1 || pin > 128) {
+                QMessageBox::warning(
+                    this, "Patch Import Error",
+                    QString("Invalid Patch connector or pin at Excel row %1.")
+                        .arg(row));
+                return false;
+            }
+
+            // Convert logical connector/pin to physical DB mapping.
+            int physicalTp = 0;
+            int physicalPin = pin;
+
+            if (pin <= 64) {
+                physicalTp = (tpNo * 2) - 1;
+            } else {
+                physicalTp = (tpNo == 15) ? 31 : tpNo * 2;
+                physicalPin -= 64;
+            }
+
+            values[3] = QString("TP-%1").arg(physicalTp);
+            values[4] = QString::number(physicalPin);
+        }
+
+        importedRows.append(values);
+    }
+
+    if (importedRows.isEmpty()) {
+        QMessageBox::warning(
+            this, "Import Error",
+            "No data rows were found. The database was not changed.");
+        return false;
+    }
+
+    // Ensure the destination table already exists.
+    QSqlQuery checkQuery(db);
+
+    checkQuery.prepare(
+        "SELECT name FROM sqlite_master "
+        "WHERE type = 'table' AND name = ? COLLATE NOCASE");
+
+    checkQuery.addBindValue(tableName);
+
+    if (!checkQuery.exec() || !checkQuery.next()) {
+        QMessageBox::warning(
+            this, "Import Error",
+            "Destination table does not exist:\n" + tableName);
+        return false;
+    }
+
+    // Begin atomic replacement.
+    if (!db.transaction()) {
+        QMessageBox::warning(
+            this, "Import Error",
+            "Unable to start transaction:\n" +
+                db.lastError().text());
+        return false;
+    }
+
+    const QString quotedTable =
+        "\"" + tableName + "\"";
+
+    QSqlQuery query(db);
+
+    if (!query.exec("DELETE FROM " + quotedTable)) {
+        const QString error = query.lastError().text();
+        db.rollback();
+
+        QMessageBox::warning(
+            this, "Import Error",
+            "Unable to clear existing records:\n" + error);
+        return false;
+    }
+
+    QStringList quotedColumns;
+    QStringList placeholders;
+
+    for (const QString &column : columns) {
+        quotedColumns.append("\"" + column + "\"");
+        placeholders.append("?");
+    }
+
+    const QString insertSql =
+        "INSERT INTO " + quotedTable +
+        " (" + quotedColumns.join(", ") + ") VALUES (" +
+        placeholders.join(", ") + ")";
+
+    if (!query.prepare(insertSql)) {
+        const QString error = query.lastError().text();
+        db.rollback();
+
+        QMessageBox::warning(
+            this, "Import Error",
+            "Unable to prepare insert query:\n" + error);
+        return false;
+    }
+
+    for (const QStringList &values : importedRows) {
+        for (int i = 0; i < values.size(); ++i)
+            query.bindValue(i, values[i]);
+
+        if (!query.exec()) {
+            const QString error = query.lastError().text();
+            db.rollback();
+
+            QMessageBox::warning(
+                this, "Import Error",
+                "Import failed. Existing records were preserved.\n\n" +
+                    error);
+            return false;
+        }
+    }
+
+    if (!db.commit()) {
+        const QString error = db.lastError().text();
+        db.rollback();
+
+        QMessageBox::warning(
+            this, "Import Error",
+            "Unable to commit imported data:\n" + error);
+        return false;
+    }
+
+    // Refresh only the imported table.
+    if (tableView) {
+        if (isPatchTable) {
+            loadPatchTable(tableName);
+        } else if (tableSuffix == "_harness") {
+            loadHarnessTable(tableName);
+        } else if (tableSuffix == "_diode") {
+            loadDiodeTable(tableName);
+        } else if (tableSuffix == "_relay") {
+            loadRelayTable(tableName);
+        }
+    }
+
+    writeToNotes(
+        QString("Imported %1 rows into %2")
+            .arg(importedRows.size())
+            .arg(tableName));
+
+    QMessageBox::information(
+        this, "Import Successful",
+        QString("Imported %1 rows into %2.")
+            .arg(importedRows.size())
+            .arg(tableName));
+
+    return true;
+}
+
 
 
 
@@ -11453,3 +12269,491 @@ void MainWindow::on_pushButton_backFromGetDetails_clicked()
 {
      ui->stackedWidget->setCurrentWidget(ui->page_dataEntry);
 }
+
+void MainWindow::on_pushButton_addDiodeRow_clicked()
+{
+    ui->tableView_diode->setEditTriggers(
+        QAbstractItemView::DoubleClicked |
+        QAbstractItemView::SelectedClicked |
+        QAbstractItemView::EditKeyPressed
+    );
+
+    // Always insert the new row at the end
+    int row = diodeModel->rowCount();
+
+    diodeModel->insertRow(row);
+
+    // Select and scroll to the newly inserted row
+    ui->tableView_diode->selectRow(row);
+
+    ui->tableView_diode->setCurrentIndex(
+        diodeModel->index(row, 0)
+    );
+
+    ui->tableView_diode->scrollTo(
+        diodeModel->index(row, 0),
+        QAbstractItemView::PositionAtCenter
+    );
+}
+
+void MainWindow::on_pushButton_delDiodeRow_clicked()
+{
+    QModelIndex index =
+            ui->tableView_diode->currentIndex();
+
+    if(!index.isValid())
+    {
+        QMessageBox::information(this, "Selection","Select row to delete");
+        return;
+    }
+
+    int row = index.row();
+
+    diodeModel->removeRow(row);
+    if(diodeModel->submitAll())
+    {
+        QMessageBox::information(this,"Success", "Row deleted successfully");
+    }
+    else
+    {
+        QMessageBox::warning(this,"Error",diodeModel->lastError().text());
+    }
+}
+
+void MainWindow::on_pushButton_addRelayRow_clicked()
+{
+    ui->tableView_Relay->setEditTriggers(
+        QAbstractItemView::DoubleClicked |
+        QAbstractItemView::SelectedClicked |
+        QAbstractItemView::EditKeyPressed
+    );
+
+    // Always insert the new row at the end
+    int row = relayModel->rowCount();
+
+    relayModel->insertRow(row);
+
+    // Select and scroll to the newly inserted row
+    ui->tableView_Relay->selectRow(row);
+
+    ui->tableView_Relay->setCurrentIndex(
+        relayModel->index(row, 0)
+    );
+
+    ui->tableView_Relay->scrollTo(
+        relayModel->index(row, 0),
+        QAbstractItemView::PositionAtCenter
+    );
+}
+
+void MainWindow::on_pushButton_delRelayRow_clicked()
+{
+    QModelIndex index =
+            ui->tableView_Relay->currentIndex();
+
+    if(!index.isValid())
+    {
+        QMessageBox::information(this, "Selection","Select row to delete");
+        return;
+    }
+
+    int row = index.row();
+
+    relayModel->removeRow(row);
+    if(relayModel->submitAll())
+    {
+        QMessageBox::information(this,"Success", "Row deleted successfully");
+    }
+    else
+    {
+        QMessageBox::warning(this,"Error",relayModel->lastError().text());
+    }
+}
+
+void MainWindow::on_pushButton_editTableViewDiode_clicked()
+{
+    ui->tableView_diode->setEditingEnabled(true);
+
+    QMessageBox::information(this,"Editable","Now you can edit table");
+}
+
+void MainWindow::on_pushButton_saveChangesDiode_clicked()
+{
+    // Step 1: Refresh Patch references from the visible Patch table.
+    if (!refreshPatchValidationLists())
+        return;
+
+    // Step 2: Extract current Diode model rows.
+    QVector<QString> cableTemp;
+    QVector<QString> anodeConTemp, anodePinTemp;
+    QVector<QString> cathodeConTemp, cathodePinTemp;
+    QVector<QString> expVoltageTemp;
+
+    for (int row = 0; row < diodeModel->rowCount(); ++row)
+    {
+        cableTemp.append(
+            diodeModel->index(row, 1).data().toString().trimmed());
+
+        anodeConTemp.append(
+            diodeModel->index(row, 2).data().toString().trimmed());
+
+        anodePinTemp.append(
+            diodeModel->index(row, 3).data().toString().trimmed());
+
+        cathodeConTemp.append(
+            diodeModel->index(row, 4).data().toString().trimmed());
+
+        cathodePinTemp.append(
+            diodeModel->index(row, 5).data().toString().trimmed());
+
+        expVoltageTemp.append(
+            diodeModel->index(row, 6).data().toString().trimmed());
+    }
+
+    // Step 3: Run existing validation rules.
+    if (!validateDiodeData(
+            cableTemp,
+            anodeConTemp, anodePinTemp,
+            cathodeConTemp, cathodePinTemp,
+            expVoltageTemp))
+    {
+        QMessageBox::warning(
+               this,
+               "Validation Failed",
+               "Diode data validation failed.\n\n"
+               "Please check the Error Log page for details.");
+
+        // Navigate to the Error Log page after the popup closes.
+           ui->stackedWidget->setCurrentWidget(ui->page_dataEntry);
+
+        return;
+    }
+
+    // Step 4: Save only after validation succeeds.
+    if (diodeModel->submitAll())
+    {
+        QMessageBox::information(
+            this, "Success", "Changes saved successfully");
+
+       ui->tableView_diode->setEditingEnabled(false);
+    }
+    else
+    {
+        QMessageBox::warning(
+            this, "Error", diodeModel->lastError().text());
+    }
+}
+
+void MainWindow::on_pushButton_revertChangesDiode_clicked()
+{
+    diodeModel->revertAll();
+    ui->tableView_diode->setEditingEnabled(false);
+}
+
+void MainWindow::on_pushButton_editTableViewRelay_clicked()
+{
+    ui->tableView_Relay->setEditingEnabled(true);
+
+    QMessageBox::information(this,"Editable","Now you can edit table");
+}
+
+void MainWindow::on_pushButton_saveChangesRelay_clicked()
+{
+    // Step 1: Refresh Patch references from the visible Patch table.
+    if (!refreshPatchValidationLists())
+        return;
+
+    // Step 2: Extract current Relay model rows.
+    QVector<QString> cableTemp;
+    QVector<QString> sourceConTemp, sourcePinTemp;
+    QVector<QString> relaySideConTemp, relaySideRSPinsTemp;
+    QVector<QString> destConTemp, destPinTemp;
+    QVector<QString> excitationVoltageTemp, expTemp;
+
+    for (int row = 0; row < relayModel->rowCount(); ++row)
+    {
+        cableTemp.append(
+            relayModel->index(row, 1).data().toString().trimmed());
+
+        sourceConTemp.append(
+            relayModel->index(row, 2).data().toString().trimmed());
+
+        sourcePinTemp.append(
+            relayModel->index(row, 3).data().toString().trimmed());
+
+        relaySideConTemp.append(
+            relayModel->index(row, 4).data().toString().trimmed());
+
+        relaySideRSPinsTemp.append(
+            relayModel->index(row, 5).data().toString().trimmed());
+
+        destConTemp.append(
+            relayModel->index(row, 6).data().toString().trimmed());
+
+        destPinTemp.append(
+            relayModel->index(row, 7).data().toString().trimmed());
+
+        excitationVoltageTemp.append(
+            relayModel->index(row, 8).data().toString().trimmed());
+
+        expTemp.append(
+            relayModel->index(row, 9).data().toString().trimmed());
+    }
+
+    // Step 3: Run existing validation rules.
+    if (!validateRelayData(
+            cableTemp,
+            sourceConTemp,
+            sourcePinTemp,
+            relaySideConTemp,
+            relaySideRSPinsTemp,
+            destConTemp,
+            destPinTemp,
+            excitationVoltageTemp,
+            expTemp))
+    {
+        QMessageBox::warning(
+               this,
+               "Validation Failed",
+               "Relay data validation failed.\n\n"
+               "Please check the Error Log page for details.");
+
+        // Navigate to the Error Log page after the popup closes.
+           ui->stackedWidget->setCurrentWidget(ui->page_dataEntry);
+
+        return;
+    }
+
+    // Step 4: Save only after validation succeeds.
+    if (relayModel->submitAll())
+    {
+        QMessageBox::information(
+            this, "Success", "Changes saved successfully");
+
+        ui->tableView_Relay->setEditingEnabled(false);
+
+    }
+    else
+    {
+        QMessageBox::warning(
+            this, "Error", relayModel->lastError().text());
+    }
+}
+
+void MainWindow::on_pushButton_revertChangesRelay_clicked()
+{
+    relayModel->revertAll();
+    ui->tableView_Relay->setEditingEnabled(false);
+}
+
+void MainWindow::on_pushButton_clearErrorLog_clicked()
+{
+    ui->textEdit_ErrorLog->clear();
+}
+
+void MainWindow::on_pushButton_addPatchRow_clicked()
+{
+    QStandardItemModel *displayModel =
+        qobject_cast<QStandardItemModel *>(
+            ui->tableView_patch->model());
+
+    if (!displayModel)
+        return;
+
+    const int row = displayModel->rowCount();
+
+    QList<QStandardItem *> items;
+
+    for (int col = 0; col < 6; ++col)
+        items.append(new QStandardItem(""));
+
+    // Default cable name from an existing row, if available.
+    QString cable;
+
+    if (row > 0)
+    {
+        cable = displayModel->index(0, 1).data().toString();
+    }
+    else
+    {
+        cable = ui->label_fileName->text().trimmed();
+    }
+
+    items[1]->setText(cable);
+
+    displayModel->appendRow(items);
+
+    ui->tableView_patch->setCurrentIndex(
+        displayModel->index(row, 1));
+
+    ui->tableView_patch->setEditTriggers(
+        QAbstractItemView::DoubleClicked |
+        QAbstractItemView::SelectedClicked |
+        QAbstractItemView::EditKeyPressed);
+
+    ui->tableView_patch->edit(
+        displayModel->index(row, 1));
+}
+
+void MainWindow::on_pushButton_delPatchRow_clicked()
+{
+    QStandardItemModel *displayModel =
+        qobject_cast<QStandardItemModel *>(
+            ui->tableView_patch->model());
+
+    if (!displayModel)
+        return;
+
+    const QModelIndex index =
+        ui->tableView_patch->currentIndex();
+
+    if (!index.isValid())
+    {
+        QMessageBox::information(
+            this, "Selection",
+            "Select a Patch row to delete.");
+        return;
+    }
+
+    const int row = index.row();
+
+    // Get the database ID from the visible model.
+    const QString id =
+        displayModel->index(row, 0).data().toString().trimmed();
+
+    if (id.isEmpty())
+    {
+        QMessageBox::warning(
+            this, "Error",
+            "Cannot delete this row because it has no database ID.");
+        return;
+    }
+
+    // Find the corresponding database-model row using its ID.
+    int dbRow = -1;
+
+    for (int r = 0; r < patchModel->rowCount(); ++r)
+    {
+        if (patchModel->index(r, 0).data().toString() == id)
+        {
+            dbRow = r;
+            break;
+        }
+    }
+
+    if (dbRow < 0)
+    {
+        QMessageBox::warning(
+            this, "Error",
+            "The selected Patch record was not found in the database model.");
+        return;
+    }
+
+    // Mark the corresponding database row for deletion.
+    if (!patchModel->removeRow(dbRow))
+    {
+        QMessageBox::warning(
+            this, "Error",
+            "Unable to remove the selected Patch record.");
+        return;
+    }
+
+    // Commit the deletion immediately.
+    if (patchModel->submitAll())
+    {
+        loadPatchTable(patchModel->tableName());
+
+        QMessageBox::information(
+            this, "Success",
+            "Patch row deleted successfully.");
+    }
+    else
+    {
+        const QString error = patchModel->lastError().text();
+
+        patchModel->revertAll();
+        loadPatchTable(patchModel->tableName());
+
+        QMessageBox::warning(this, "Error", error);
+    }
+}
+
+
+
+void MainWindow::on_pushButton_exportPatch_clicked()
+{
+    exportTableToExcel(ui->tableView_patch, "patchfile");
+}
+
+void MainWindow::on_pushButton_exportHarness_clicked()
+{
+    exportTableToExcel(ui->tableView_harness, "harnessfile");
+}
+
+void MainWindow::on_pushButton_exportDiode_clicked()
+{
+    exportTableToExcel(ui->tableView_diode, "diodefile");
+}
+
+void MainWindow::on_pushButton_exportRelay_clicked()
+{
+    exportTableToExcel(ui->tableView_Relay, "relayfile");
+}
+
+
+
+void MainWindow::on_pushButton_importPatch_clicked()
+{
+    importTableFromExcel(
+        ui->tableView_patch,
+        "_patch",
+        QStringList() << "cable"
+                      << "userCon"
+                      << "userPin"
+                      << "patchCon"
+                      << "patchPin",
+        true);
+}
+
+void MainWindow::on_pushButton_importHarness_clicked()
+{
+    importTableFromExcel(
+        ui->tableView_harness,
+        "_harness",
+        QStringList() << "cable"
+                      << "sourceCon"
+                      << "sourcePin"
+                      << "destCon"
+                      << "destPin"
+                      << "exp");
+}
+
+void MainWindow::on_pushButton_importDiode_clicked()
+{
+    importTableFromExcel(
+        ui->tableView_diode,
+        "_diode",
+        QStringList() << "cable"
+                      << "anodeCon"
+                      << "anodePin"
+                      << "cathodeCon"
+                      << "cathodePin"
+                      << "expVoltage");
+}
+
+void MainWindow::on_pushButton_impotRelay_clicked()
+{
+    importTableFromExcel(
+        ui->tableView_Relay,
+        "_relay",
+        QStringList() << "cable"
+                      << "sourceCon"
+                      << "sourcePin"
+                      << "relaySideCon"
+                      << "relaySideRSPins"
+                      << "destCon"
+                      << "destPin"
+                      << "excitationVoltage"
+                      << "exp");
+}
+

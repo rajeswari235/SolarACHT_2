@@ -26,6 +26,7 @@ SOURCES += \
 
 HEADERS += \
     CalibrationTableView.h \
+    CustomTableView.h \
     mainwindow.h \
     testcontroller.h
 
