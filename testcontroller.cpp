@@ -209,34 +209,27 @@ QString TestController::detectDevicePort()
 {
     qDebug() << "\n========== DEVICE AUTO DETECTION START ==========";
 
-    // Check if the main serial object is already connected
+    // Return existing connection if already connected.
     if (serial->isOpen())
     {
-        qDebug() << "[INFO] Already connected to:"
-                 << serial->portName();
-
+        qDebug() << "[INFO] Already connected:" << serial->portName();
         return serial->portName();
     }
 
     const QByteArray packet =
-            QByteArray::fromHex("53 4B 31 01 28");
+        QByteArray::fromHex("53 4B 31 01 28");
 
-    const QByteArray expectedResponse =
-            QByteArray::fromHex("51 52 FF 01 01");
+    const QList<QByteArray> expectedResponses = {
+        QByteArray::fromHex("51 52 FF 01 01"),
+        QByteArray::fromHex("51 52 FF FF 01")
+    };
 
     const int responseTimeoutMs = 500;
 
-    qDebug() << "[INFO] TX HEX:"
-             << packet.toHex(' ').toUpper();
-
-    qDebug() << "[INFO] Expected RX HEX:"
-             << expectedResponse.toHex(' ').toUpper();
-
     const QList<QSerialPortInfo> ports =
-            QSerialPortInfo::availablePorts();
+        QSerialPortInfo::availablePorts();
 
-    qDebug() << "[INFO] Available ports count:"
-             << ports.size();
+    qDebug() << "[INFO] Available ports:" << ports.size();
 
     foreach (const QSerialPortInfo &info, ports)
     {
@@ -249,108 +242,56 @@ QString TestController::detectDevicePort()
         tempSerial.setStopBits(QSerialPort::OneStop);
         tempSerial.setFlowControl(QSerialPort::NoFlowControl);
 
-        qDebug() << "\n----------------------------------------";
         qDebug() << "[CHECK] Port:" << info.portName();
-        qDebug() << "[CHECK] Description:" << info.description();
 
-        // Open the candidate port
         if (!tempSerial.open(QIODevice::ReadWrite))
         {
-            qDebug() << "[ERROR] Failed to open:"
-                     << info.portName();
-
-            qDebug() << "[ERROR] Reason:"
+            qDebug() << "[WARN] Cannot open"
+                     << info.portName() << ":"
                      << tempSerial.errorString();
-
             continue;
         }
 
-        qDebug() << "[OK] Port opened:"
-                 << info.portName();
-
-        // Clear stale data before sending the request
+        // Clear stale data before sending the request.
         tempSerial.clear(QSerialPort::AllDirections);
 
-        // Send command
-        const qint64 bytesWritten = tempSerial.write(packet);
-
-        qDebug() << "[TX] Bytes accepted by Qt:"
-                 << bytesWritten;
-
-        if (bytesWritten != packet.size())
+        // Transmit detection command.
+        if (tempSerial.write(packet) != packet.size() ||
+            !tempSerial.waitForBytesWritten(500))
         {
-            qDebug() << "[ERROR] Incomplete write request";
+            qDebug() << "[WARN] Command transmission failed on"
+                     << info.portName();
 
             tempSerial.close();
             continue;
         }
 
-        if (!tempSerial.waitForBytesWritten(500))
-        {
-            qDebug() << "[ERROR] Write timeout/error:"
-                     << tempSerial.errorString();
-
-            tempSerial.close();
-            continue;
-        }
-
-        qDebug() << "[TX] Command transmitted successfully";
-
-        // Receive response until the expected frame length arrives
+        // Receive response.
         QByteArray response;
         QElapsedTimer timer;
         timer.start();
 
         while (timer.elapsed() < responseTimeoutMs &&
-               response.size() < expectedResponse.size())
+               response.size() < expectedResponses.first().size())
         {
             if (tempSerial.bytesAvailable() == 0)
             {
                 if (!tempSerial.waitForReadyRead(50))
-                {
-                    // No bytes currently available; continue until timeout.
                     continue;
-                }
             }
 
-            const QByteArray received = tempSerial.readAll();
-
-            if (!received.isEmpty())
-            {
-                response.append(received);
-
-                qDebug() << "[RX] New chunk:"
-                         << received.toHex(' ').toUpper();
-
-                qDebug() << "[RX] Accumulated response:"
-                         << response.toHex(' ').toUpper();
-
-                qDebug() << "[RX] Total bytes:"
-                         << response.size();
-            }
+            response.append(tempSerial.readAll());
         }
 
-        qDebug() << "[RX] Final response HEX:"
-                 << response.toHex(' ').toUpper();
-
-        qDebug() << "[RX] Final response size:"
-                 << response.size();
-
-        qDebug() << "[RX] Expected size:"
-                 << expectedResponse.size();
-
-        qDebug() << "[COMPARE] Match:"
-                 << (response == expectedResponse);
-
-        // Verify response
-        if (response == expectedResponse)
+        // Accept either valid response.
+        if (expectedResponses.contains(response))
         {
             const QString detectedPort = info.portName();
 
+            tempSerial.close();
+
             qDebug() << "[SUCCESS] Device detected on:"
                      << detectedPort;
-
-            tempSerial.close();
 
             qDebug() << "========== AUTO DETECTION SUCCESS ==========\n";
 
@@ -359,18 +300,16 @@ QString TestController::detectDevicePort()
 
         if (response.isEmpty())
         {
-            qDebug() << "[WARN] No response received on:"
-                     << info.portName();
+            qDebug() << "[WARN] No response on" << info.portName();
         }
         else
         {
-            qDebug() << "[WARN] Response did not match expected frame";
+            qDebug() << "[WARN] Invalid response on"
+                     << info.portName()
+                     << ":" << response.toHex(' ').toUpper();
         }
 
         tempSerial.close();
-
-        qDebug() << "[INFO] Closed port:"
-                 << info.portName();
     }
 
     qDebug() << "[FAIL] Device not detected on any available port";

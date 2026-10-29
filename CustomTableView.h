@@ -38,7 +38,10 @@ public:
                     : QAbstractItemView::SingleSelection);
 
         setSelectionBehavior(QAbstractItemView::SelectItems);
-        setEditTriggers(QAbstractItemView::NoEditTriggers);
+
+        setEditTriggers(
+            enabled ? QAbstractItemView::DoubleClicked
+                    : QAbstractItemView::NoEditTriggers);
 
         if (!enabled)
         {
@@ -67,13 +70,17 @@ protected:
 
         QModelIndex index = indexAt(event->pos());
 
-        if (!index.isValid())
+        if (!index.isValid() ||
+            !(index.flags() & Qt::ItemIsEditable))
+        {
+            event->accept();
             return;
+        }
 
-        if (!(index.flags() & Qt::ItemIsEditable))
-            return;
+        setCurrentIndex(index);
+        edit(index);
 
-        QTableView::mouseDoubleClickEvent(event);
+        event->accept();
     }
 
     void keyPressEvent(QKeyEvent *event) override

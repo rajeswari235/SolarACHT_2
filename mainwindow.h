@@ -515,6 +515,22 @@ private slots:
 
        void on_pushButton_impotRelay_clicked();
 
+       void on_checkBox_adjustRelayColumns_clicked(bool checked);
+
+       void on_checkBox_adjustDiodeColumns_clicked(bool checked);
+
+       void on_checkBox_adjustInsuIsoColumns_clicked(bool checked);
+
+       void on_checkBox_adjustTwoWireColumns_clicked(bool checked);
+
+       void on_checkBox_editRemarksTwoWire_clicked(bool checked);
+
+       void on_checkBox_editRemarksIsoInsu_clicked(bool checked);
+
+       void on_checkBox_editRemarksDiode_clicked(bool checked);
+
+       void on_checkBox_editRemarksRelay_clicked(bool checked);
+
 public slots:
 
       void portStatus(const QString &data);

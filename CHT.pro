@@ -28,6 +28,7 @@ HEADERS += \
     CalibrationTableView.h \
     CustomTableView.h \
     mainwindow.h \
+    testTableViewsRemarks.h \
     testcontroller.h
 
 FORMS += \

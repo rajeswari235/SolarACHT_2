@@ -325,9 +325,41 @@ MainWindow::MainWindow(QWidget *parent)
     connect(test, &TestController::relayNackReceived,
             this, &MainWindow::onRelayNackReceived);
 
+    //Proper maintaining row heights for display tableViews
+       connect(ui->tabWidget,
+               &QTabWidget::currentChanged,
+               this,
+               [this](int index)
+       {
+           QWidget *page = ui->tabWidget->widget(index);
+
+           if (!page)
+               return;
+
+           // Wait until the selected page has been laid out.
+           QMetaObject::invokeMethod(
+               this,
+               [page]()
+               {
+                   if (!page)
+                       return;
+
+                   const QList<QTableView *> tables =
+                       page->findChildren<QTableView *>();
+
+                   for (QTableView *table : tables)
+                   {
+                       if (table->model())
+                           table->resizeRowsToContents();
+                   }
+               },
+               Qt::QueuedConnection);
+       });
+
     //Hidden elements
     ui->doubleSpinBox_voltage->hide();
     ui->checkBox_simulate->hide();
+    ui->checkBox_showFailedPinsTwoWire->hide();
 
 }
 MainWindow::~MainWindow()
@@ -1017,6 +1049,7 @@ void MainWindow::on_pushButton_delTomain_clicked()
 
 void MainWindow::on_pushButton_dataEntry_clicked()
 {
+    ui->textEdit_ErrorLog->clear();
     ui->comboBox_fileNames->clear();
     ui->comboBox_fileNames->addItems(getCableNames());
     ui->stackedWidget->setCurrentIndex(10);
@@ -3081,11 +3114,11 @@ void MainWindow::processTwoWireResults()
 
         if (pass)
         {
-            remarks = "Within expected range";
+            remarks = "";
         }
         else
         {
-            remarks = "Measured value out of range";
+            remarks = "";
         }
 
         m_twoWireTestModel->setData(
@@ -4562,8 +4595,8 @@ void MainWindow::onRelayResultsCompleted()
 
         m_relayTestModel->setData(
             m_relayTestModel->index(row, 13),
-            pass ? "Within expected range"
-                 : "Measured value out of range");
+            pass ? ""
+                 : "");
 
         writeToNotes(
             QString("Relay Result %1 | Measured: %2 | "
@@ -4998,9 +5031,6 @@ void MainWindow::populateInsulationTable(
     ui->tableView_InsuIso->setWordWrap(true);
     ui->tableView_InsuIso->setTextElideMode(Qt::ElideNone);
 
-    // No horizontal scrolling
-    ui->tableView_InsuIso->setHorizontalScrollBarPolicy(
-        Qt::ScrollBarAlwaysOff);
 
     ui->tableView_InsuIso->resizeRowsToContents();
 
@@ -6094,7 +6124,7 @@ void MainWindow::populateDiodeTestTable(
         "Source Pin",
         "Destination Conn (Cathode)",
         "Destination Pin",
-        "Voltage Drop Across Diode (Min-Max)",
+        "Voltage Drop Across Diode",
         "Result",
         "Remarks"
     });
@@ -6774,24 +6804,10 @@ void MainWindow::populateRelayTestTable(
     // Attach the model to the Relay table.
     ui->tableView_relay->setModel(m_relayTestModel);
 
-    // Keep columns readable; allow horizontal scrolling.
+    // Stretch all columns to fill the available table width.
     ui->tableView_relay->horizontalHeader()
-        ->setSectionResizeMode(QHeaderView::Interactive);
+        ->setSectionResizeMode(QHeaderView::Stretch);
 
-    ui->tableView_relay->setHorizontalScrollMode(
-        QAbstractItemView::ScrollPerPixel);
-
-    // Set practical initial column widths.
-    const int columnWidths[] = {
-        55, 100, 240, 85, 260, 100, 240,
-        100, 130, 100, 100, 130, 100, 180
-    };
-
-    for (int col = 0; col < 14; ++col)
-    {
-        ui->tableView_relay->setColumnWidth(
-            col, columnWidths[col]);
-    }
 
     int serialNumber = 1;
     int start = 0;
@@ -7750,6 +7766,16 @@ void MainWindow::on_pushButton_run_clicked()
         QMessageBox::information(this,"Mapping Failed","Patch to Harness mapping failed.");
         return;
     }
+
+    ui->checkBox_adjustRelayColumns->setChecked(false);
+    ui->checkBox_adjustDiodeColumns->setChecked(false);
+    ui->checkBox_adjustInsuIsoColumns->setChecked(false);
+    ui->checkBox_adjustTwoWireColumns->setChecked(false);
+
+    ui->tableView_twoWireTest->setRemarksEditingEnabled(false);
+    ui->tableView_InsuIso->setRemarksEditingEnabled(false);
+    ui->tableView_diodeTest->setRemarksEditingEnabled(false);
+    ui->tableView_relay->setRemarksEditingEnabled(false);
 
 
     // -------------------------------------------------
@@ -12757,3 +12783,81 @@ void MainWindow::on_pushButton_impotRelay_clicked()
                       << "exp");
 }
 
+
+void MainWindow::on_checkBox_adjustRelayColumns_clicked(bool checked)
+{
+    if (checked)
+    {
+        // Allow manual column resizing
+        ui->tableView_relay->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Interactive);
+    }
+    else
+    {
+        // Stretch columns to fill the available width
+        ui->tableView_relay->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Stretch);
+    }
+}
+
+void MainWindow::on_checkBox_adjustDiodeColumns_clicked(bool checked)
+{
+    if (checked)
+    {
+        ui->tableView_diodeTest->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Interactive);
+    }
+    else
+    {
+        ui->tableView_diodeTest->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Stretch);
+    }
+}
+
+void MainWindow::on_checkBox_adjustInsuIsoColumns_clicked(bool checked)
+{
+    if (checked)
+    {
+        ui->tableView_InsuIso->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Interactive);
+    }
+    else
+    {
+        ui->tableView_InsuIso->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Stretch);
+    }
+}
+
+void MainWindow::on_checkBox_adjustTwoWireColumns_clicked(bool checked)
+{
+    if (checked)
+    {
+        ui->tableView_twoWireTest->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Interactive);
+    }
+    else
+    {
+        ui->tableView_twoWireTest->horizontalHeader()
+            ->setSectionResizeMode(QHeaderView::Stretch);
+    }
+}
+
+void MainWindow::on_checkBox_editRemarksTwoWire_clicked(bool checked)
+{
+    ui->tableView_twoWireTest->setRemarksEditingEnabled(checked);
+}
+
+void MainWindow::on_checkBox_editRemarksIsoInsu_clicked(bool checked)
+{
+    ui->tableView_InsuIso->setRemarksEditingEnabled(checked);
+}
+
+void MainWindow::on_checkBox_editRemarksDiode_clicked(bool checked)
+{
+    ui->tableView_diodeTest->setRemarksEditingEnabled(checked);
+}
+
+void MainWindow::on_checkBox_editRemarksRelay_clicked(bool checked)
+{
+    ui->tableView_relay->setRemarksEditingEnabled(checked);
+}

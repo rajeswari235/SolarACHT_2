@@ -56,7 +56,7 @@
     gridline-color: #d9d9d9;</string>
       </property>
       <property name="currentIndex">
-       <number>10</number>
+       <number>4</number>
       </property>
       <widget class="QWidget" name="page">
        <layout class="QGridLayout" name="gridLayout_2">
@@ -6072,7 +6072,31 @@ QPushButton:pressed
              </font>
             </property>
             <property name="text">
-             <string>TextLabel</string>
+             <string>Two Wire Test</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_adjustTwoWireColumns">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Adjust Columns</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_editRemarksTwoWire">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Edit Remarks</string>
             </property>
            </widget>
           </item>
@@ -6095,7 +6119,7 @@ QPushButton:pressed
          </layout>
         </item>
         <item row="1" column="0">
-         <widget class="QTableView" name="tableView_twoWireTest">
+         <widget class="TestTableViewsRemarks" name="tableView_twoWireTest">
           <property name="styleSheet">
            <string notr="true">QScrollBar:vertical
 {
@@ -6508,6 +6532,9 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
              <bool>true</bool>
             </property>
@@ -6520,8 +6547,11 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -6531,6 +6561,9 @@ QPushButton:disabled {
              <font>
               <pointsize>12</pointsize>
              </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true"/>
             </property>
             <property name="readOnly">
              <bool>true</bool>
@@ -6544,6 +6577,9 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
              <bool>true</bool>
             </property>
@@ -6556,6 +6592,9 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
              <bool>true</bool>
             </property>
@@ -6567,6 +6606,9 @@ QPushButton:disabled {
              <font>
               <pointsize>12</pointsize>
              </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true"/>
             </property>
             <property name="readOnly">
              <bool>true</bool>
@@ -6596,6 +6638,9 @@ QPushButton:disabled {
              <font>
               <pointsize>12</pointsize>
              </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true"/>
             </property>
             <property name="readOnly">
              <bool>true</bool>
@@ -6643,6 +6688,9 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
              <bool>true</bool>
             </property>
@@ -6689,8 +6737,11 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -6769,6 +6820,9 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
              <bool>true</bool>
             </property>
@@ -6780,6 +6834,9 @@ QPushButton:disabled {
              <font>
               <pointsize>12</pointsize>
              </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true"/>
             </property>
             <property name="readOnly">
              <bool>true</bool>
@@ -6810,6 +6867,9 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
              <bool>true</bool>
             </property>
@@ -6821,6 +6881,9 @@ QPushButton:disabled {
              <font>
               <pointsize>12</pointsize>
              </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true"/>
             </property>
             <property name="readOnly">
              <bool>true</bool>
@@ -6834,8 +6897,11 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -6846,8 +6912,11 @@ QPushButton:disabled {
               <pointsize>12</pointsize>
              </font>
             </property>
+            <property name="styleSheet">
+             <string notr="true"/>
+            </property>
             <property name="readOnly">
-             <bool>false</bool>
+             <bool>true</bool>
             </property>
            </widget>
           </item>
@@ -7246,7 +7315,7 @@ QScrollBar::sub-page:horizontal
       <widget class="QWidget" name="page_InsuIsoTEst">
        <layout class="QGridLayout" name="gridLayout_20">
         <item row="1" column="0">
-         <widget class="QTableView" name="tableView_InsuIso">
+         <widget class="TestTableViewsRemarks" name="tableView_InsuIso">
           <property name="styleSheet">
            <string notr="true">QScrollBar:vertical
 {
@@ -7539,7 +7608,31 @@ QPushButton:disabled {
              </font>
             </property>
             <property name="text">
-             <string>TextLabel</string>
+             <string>InsuIsoTest</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_adjustInsuIsoColumns">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Adjust Columns</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_editRemarksIsoInsu">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Edit Remarks</string>
             </property>
            </widget>
           </item>
@@ -7592,6 +7685,64 @@ QProgressBar::chunk {
       </widget>
       <widget class="QWidget" name="page_diodeTest">
        <layout class="QGridLayout" name="gridLayout_23">
+        <item row="0" column="0">
+         <layout class="QHBoxLayout" name="horizontalLayout_23">
+          <item>
+           <widget class="QLabel" name="label_test_Diode">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+              <weight>75</weight>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="text">
+             <string>Diode</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_adjustDiodeColumns">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Adjust Columns</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_editRemarksDiode">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Edit Remarks</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_48">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeType">
+             <enum>QSizePolicy::Minimum</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
         <item row="3" column="0">
          <layout class="QHBoxLayout" name="horizontalLayout_22">
           <item>
@@ -7808,7 +7959,7 @@ QPushButton:disabled {
          </layout>
         </item>
         <item row="1" column="0">
-         <widget class="QTableView" name="tableView_diodeTest">
+         <widget class="TestTableViewsRemarks" name="tableView_diodeTest">
           <property name="styleSheet">
            <string notr="true">QScrollBar:vertical
 {
@@ -7874,40 +8025,6 @@ QScrollBar::sub-page:horizontal
           </property>
          </widget>
         </item>
-        <item row="0" column="0">
-         <layout class="QHBoxLayout" name="horizontalLayout_23">
-          <item>
-           <widget class="QLabel" name="label_test_Diode">
-            <property name="font">
-             <font>
-              <pointsize>10</pointsize>
-              <weight>75</weight>
-              <bold>true</bold>
-             </font>
-            </property>
-            <property name="text">
-             <string>Diode</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <spacer name="horizontalSpacer_48">
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
-            </property>
-            <property name="sizeType">
-             <enum>QSizePolicy::Minimum</enum>
-            </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>40</width>
-              <height>20</height>
-             </size>
-            </property>
-           </spacer>
-          </item>
-         </layout>
-        </item>
         <item row="2" column="0">
          <widget class="QProgressBar" name="progressBar_DiodeTest">
           <property name="styleSheet">
@@ -7956,6 +8073,30 @@ QProgressBar::chunk {
            </widget>
           </item>
           <item>
+           <widget class="QCheckBox" name="checkBox_adjustRelayColumns">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Adjust Columns</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="checkBox_editRemarksRelay">
+            <property name="font">
+             <font>
+              <pointsize>10</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Edit Remarks</string>
+            </property>
+           </widget>
+          </item>
+          <item>
            <spacer name="horizontalSpacer_49">
             <property name="orientation">
              <enum>Qt::Horizontal</enum>
@@ -7974,7 +8115,7 @@ QProgressBar::chunk {
          </layout>
         </item>
         <item row="1" column="0">
-         <widget class="QTableView" name="tableView_relay">
+         <widget class="TestTableViewsRemarks" name="tableView_relay">
           <property name="styleSheet">
            <string notr="true">QScrollBar:vertical
 {
@@ -8310,6 +8451,11 @@ QPushButton:disabled {
    <class>CustomTableView</class>
    <extends>QTableView</extends>
    <header>customtableview.h</header>
+  </customwidget>
+  <customwidget>
+   <class>TestTableViewsRemarks</class>
+   <extends>QTableView</extends>
+   <header>testtableviewsremarks.h</header>
   </customwidget>
  </customwidgets>
  <resources>
