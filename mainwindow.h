@@ -69,7 +69,7 @@ public:
                                           const QVector<QString> &destPinTemp,
                                           const QVector<QString> &expTemp
                                           );
-     
+
      bool saveHarnessToDb(const QString &cableName,
                                       const QVector<QString> &cableTemp,
                                       const QVector<QString> &sourceConTemp,
@@ -531,6 +531,13 @@ private slots:
 
        void on_checkBox_editRemarksRelay_clicked(bool checked);
 
+       void on_pushButton_browseImage_clicked();
+
+       void on_pushButton_addMetaData_clicked();
+
+       void on_comboBox_files_currentTextChanged(const QString &arg1);
+
+
 public slots:
 
       void portStatus(const QString &data);
@@ -590,6 +597,13 @@ public slots:
 
        void onRelayNackReceived(quint8 relayId, int resultIndex);
 
+       bool saveImageDetailsToDb(
+               const QString &cableName,
+               const QString &imagePath,
+               const QString &notes,
+               const QString &testPerformedBy,
+               const QString &inspectedBy,
+               const QString &projectName);
 
 
 private:
@@ -657,6 +671,12 @@ private:
 
     int failedDiodeCount = 0;
     int failedRelayCount = 0;
+
+    QByteArray d_imageData;
+    QString d_projectName;
+    QString d_notes;
+    QString d_testPerformedBy;
+    QString d_inspectedBy;
 
 };
 

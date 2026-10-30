@@ -8,6 +8,7 @@
         <file>images/solar1.png</file>
         <file>images/cht_background.png</file>
         <file>images/drdo.png</file>
+        <file>images/charka.png</file>
     </qresource>
     <qresource prefix="/">
         <file>images/cht_background.png</file>
